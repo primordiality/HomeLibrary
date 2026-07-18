@@ -160,15 +160,15 @@ CREATE POLICY book_copies_select_all ON book_copies
 FOR SELECT USING (auth.uid() IS NOT NULL);
 CREATE POLICY book_copies_manage_owners_or_librarians ON book_copies
 FOR ALL USING (
-SELECT l.owner_id FROM libraries l 
-      WHERE l.id = book_copies.library_id) = auth.uid()
-OR EXISTS (
-    SELECT 1 FROM library_members lm 
-    JOIN libraries ll ON ll.id = lm.library_id 
-    WHERE ll.id = book_copies.library_id 
-          AND lm.user_id = auth.uid()
-          AND lm.role IN ('librarian','system_admin')
-));
+    (SELECT l.owner_id FROM libraries l 
+     WHERE l.id = book_copies.library_id) = auth.uid()
+    OR EXISTS (
+        SELECT 1 FROM library_members lm 
+        JOIN libraries ll ON ll.id = lm.library_id 
+        WHERE ll.id = book_copies.library_id 
+              AND lm.user_id = auth.uid()
+              AND lm.role IN ('librarian','system_admin')
+    ));
 
 --borrows: patrons see own; librarians/owners manage
 CREATE POLICY borrows_select_all ON borrows
