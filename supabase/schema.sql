@@ -155,50 +155,52 @@ CREATE POLICY books_manage_owned ON books
     FOR ALL USING ((SELECT lib.owner_id FROM libraries lib JOIN book_copies bc 
                       ON bc.library_id = lib.id WHERE bc.book_isbn = books.isbn) = auth.uid());
 
--- book_copies: all can view; owners + librarians manage  
+-- book_copies: all can view; owners/librarians manage  
 CREATE POLICY book_copies_select_all ON book_copies 
+FOR SELECT USING (auth.uid() IS NOT NULL);
+CREATE POLICY book_copies_manage_owners_or_librarians ON book_copies
+FOR ALL USING (
+    (SELECT l.owner_id FROM libraries l WHERE l.id = $L) = auth.uid()
+    OR EXISTS (
+        SELECT 1 FROM library_members lm 
+        JOIN libraries ll ON ll.id = lm.library_id 
+        WHERE ll.id = $L AND lm.user_id = auth.uid()
+              AND lm.role IN ('librarian','system_admin'))
+);
+
+--borrows: patrons see own; librarians/owners manage
+CREATE POLICY borrows_select_all ON borrows
+    FOR SELECT USING (auth.uid() IS NOT NULL);  
+CREATE POLICY borrows_manage_owners_or_librarians ON borrows
+FOR ALL USING (patron_user_id = auth.uid() 
+    OR EXISTS (SELECT 1 FROM book_copies bc JOIN libraries l ON l.id = bc.library_id
+        WHERE bc.id = $L AND (l.owner_id = auth.uid() 
+            OR EXISTS (SELECT 1 FROM library_members lm 
+                        JOIN libraries ll ON ll.id = lm.library_id
+                            WHERE ll.id = bc.library_id AND lm.user_id = auth.uid()
+                                  AND lm.role IN ('librarian','system_admin'))))
+);
+
+--holds: patrons manage own; owners/librarians manage all in library
+CREATE POLICY holds_select_all ON holds 
     FOR SELECT USING (auth.uid() IS NOT NULL);
-CREATE POLICY book_copies_manage_owners OR librarians ON book_copies 
-    FOR ALL USING ((SELECT lib.owner_id FROM libraries lib JOIN library_members mem 
-                      ON mem.library_id = lib.id WHERE lib.id = book_copies.library_id 
-                        AND mem.user_id = auth.uid()) IS NOT NULL);
-
--- borrows: patrons see own; librarians/owners manage all  
-CREATE POLICY borrows_select_own ON borrows 
-    FOR SELECT USING (patron_user_id = auth.uid());
-CREATE POLICY borrows_manage_owners OR librarians ON borrows 
-    FOR ALL USING ((SELECT lib.owner_id FROM libraries lib JOIN book_copies bc 
-                      ON bc.library_id = lib.id WHERE bc.id = borrows.copy_id) = auth.uid()
-        OR (EXISTS (SELECT 1 FROM profiles p WHERE p.id = 
-                       (SELECT user_id FROM library_members mem 
-                          JOIN libraries l ON l.id = mem.library_id 
-                          WHERE mem.user_id = auth.uid() AND l.owner_id IS NOT NULL))));
-
--- holds: patrons manage own; owners/librarians manage all in library  
-CREATE POLICY holds_select_own ON holds 
-    FOR SELECT USING (patron_user_id = auth.uid());
-CREATE POLICY holds_manage_owners OR librarians ON holds 
-    FOR ALL USING ((SELECT lib.owner_id FROM libraries lib 
-                      WHERE lib.id = holds.library_id) = auth.uid()
-        OR EXISTS (SELECT 1 FROM profiles p 
-                    JOIN library_members mem ON mem.user_id = p.id  
-                    JOIN libraries l ON l.id = mem.library_id 
-                    WHERE l.id = holds.library_id AND l.owner_id IS NOT NULL));
+CREATE POLICY holds_manage_owners_or_librarians ON holds FOR ALL
+USING ((SELECT l.owner_id FROM libraries l 
+        WHERE l.id = $L) = auth.uid()
+    OR EXISTS (
+        SELECT 1 FROM library_members lm 
+        JOIN libraries ll ON ll.id = lm.library_id 
+        WHERE ll.id = $L AND lm.user_id = auth.uid()
+              AND lm.role IN ('librarian','system_admin')));
 
 -- ═══ AUTO-UPDATE TIMESTAMP TRIGGERS ║═
-CREATE OR REPLACE FUNCTION _set_updated_at()
-RETURNS TRIGGER 
-LANGUAGE plpgsql AS $$ 
+CREATE OR REPLACE FUNCTION _set_updated_at_ts()
+RETURNS TRIGGER LANGUAGE plpgsql AS $$ 
 BEGIN NEW.updated_at = now(); RETURN NEW; END; $$;
 
-DO $$ BEGIN   
-       CREATE TRIGGER tr_libraries_ts BEFORE UPDATE ON libraries 
-           FOR EACH ROW EXECUTE PROCEDURE _set_updated_at();  
-EXCEPTION WHEN duplicate_trigger THEN NULL;  
-END $$;
+CREATE TRIGGER tr_libraries_ts BEFORE UPDATE ON libraries 
+FOR EACH ROW EXECUTE PROCEDURE _set_updated_at_ts();
 
-DO $$ BEGIN   
-       CREATE TRIGGER tr_book_copies_ts BEFORE UPDATE ON book_copies 
-           FOR EACH ROW EXECUTE PROCEDURE _set_updated_at();  
-EXCEPTION WHEN duplicate_trigger THEN NULL;  
-END $$;
+CREATE TRIGGER tr_book_copies_ts BEFORE UPDATE ON book_copies 
+FOR EACH ROW EXECUTE PROCEDURE _set_updated_at_ts();
+
