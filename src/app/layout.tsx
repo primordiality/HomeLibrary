@@ -4,16 +4,14 @@ import "./globals.css";
 import Link from "next/link";
 
 function Sidebar() {
-  const { profile, signOut, session } = useAuth();
+  const { user, signOut } = useAuth();
   
   return (
-    <aside className="sidebar-desktop fixed left-0 top-0 z-50 flex h-screen w-64 flex-col border-r bg-white p-4">
-      {/* Brand */}
+    <aside className="fixed left-0 top-0 z-50 flex h-screen w-64 flex-col border-r bg-white p-4">
       <div className="mb-8 flex items-center gap-2">
         <span className="text-xl font-bold tracking-tight text-slate-900">librarium</span>
       </div>
 
-      {/* Nav Links */}
       <nav className="space-y-1">
         {[
           { href: "/", label: "Dashboard" },
@@ -32,9 +30,8 @@ function Sidebar() {
         ))}
       </nav>
 
-      {/* User Actions */}
       <div className="mt-auto border-t pt-4">
-        <p className="text-sm text-slate-500">Signed in as {profile?.name || "User"}</p>
+        <p className="text-sm text-slate-500">Signed in as {user?.email || "User"}</p>
         <button
           onClick={signOut}
           className="mt-3 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm font-medium text-red-600 hover:bg-red-50"

@@ -6,7 +6,7 @@ import Link from "next/link";
 import type { Library } from "@/types/db";
 
 export default function LibrariesPage() {
-  const { profile, loading: authLoading } = useAuth();
+  const { user, loading: authLoading } = useAuth();
   const [libraries, setLibraries] = useState<Library[]>([]);
   const [showForm, setShowForm] = useState(false);
   const [name, setName] = useState("");
@@ -21,7 +21,7 @@ export default function LibrariesPage() {
   }
 
   // ─── If NOT signed in, explain why and link to signin page ───────────
-  if (!profile) {
+  if (!user) {
     return (
       <div className="space-y-6">
         <header>
