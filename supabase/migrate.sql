@@ -104,34 +104,44 @@ create table if not exists locations (
 
 -- 5. Books — bibliographic master record (one row per ISBN)
 create table if not exists books (
-    isbn text primary key,            -- e.g., "978-0441172719"
+    isbn text primary key,             -- e.g., "978-0441172719"
     title text null,
     subtitle text null,
-    authors text[] null,              -- array of names: ["Asimov", "Silverberg"]
+    authors text[] null,               -- array of names: ["Asimov", "Silverberg"]
     publisher text null,
     publish_date date null,
     pages integer null,
-    language text null,               -- ISO 639-1 (e.g., "en")
-    cover_url text null,              -- URL to book cover image
-    genres text[] null,               -- ["science-fiction", "space-opera"]
-    notes text null,                  -- cataloging notes
+    language text null,                -- ISO 639-1 (e.g., "en")
+    cover_url text null,               -- URL to book cover image
+    genres text[] null,                -- ["science-fiction", "space-opera"]
+    notes text null,                   -- cataloging notes
     created_at timestamptz not null default now()
 );
 
--- 6. Book Copies — individual physical items   
+-- RLS for books (replaced skeleton-only SELECT)
+create policy books_insert_all on books for insert with check (true);
+create policy books_update_all on books for update using (true) with check (true);
+create policy books_delete_all on books for delete using (true);
+
+-- 6. Book Copies — individual physical items    
 create table if not exists book_copies (
     id uuid primary key default uuid_generate_v4(),
     book_isbn text references books(isbn) on delete cascade,
     library_id uuid references libraries(id) on delete cascade,
     location_id uuid references locations(id) on delete set null,
-    barcode text null,                -- sticker ISBN (may differ from ISBN if manual label)
+    barcode text null,                 -- sticker ISBN (may differ from ISBN if manual label)
     condition text not null check (condition in ('new', 'good', 'fair', 'poor', 'damaged')),
-    notes text null,                  -- copy-specific notes
+    notes text null,                   -- copy-specific notes
     purchase_price numeric(10,2) null,
     acquired_date date null,
     created_at timestamptz not null default now(),
     updated_at timestamptz not null default now()
 );
+
+-- RLS for book_copies (replaced skeleton-only SELECT)
+create policy books_copies_insert_all on book_copies for insert with check (true);
+create policy books_copies_update_all on book_copies for update using (true) with check (true);
+create policy books_copies_delete_all on book_copies for delete using (true);
 
 -- 7. Borrow Records — checkout/return tracking
 create table if not exists borrows (
