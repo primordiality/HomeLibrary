@@ -161,8 +161,18 @@ export default function LibrariesPage() {
            </p>   
          </header>
 
-          {/* Add / Edit Form */}
-        {showForm && (
+           {/* Add Library Button */}
+          <div className="flex justify-end">
+           <button
+             onClick={() => setShowForm(!showForm)}
+              className="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-indigo-700"
+               >
+             {showForm ? "Cancel" : "+ Add Library"}
+             </button>
+           </div>
+
+           {/* Add / Edit Form */}
+          {showForm && (
           <form
           onSubmit={handleCreate}
           className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm"
