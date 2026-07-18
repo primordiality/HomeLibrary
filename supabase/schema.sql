@@ -174,21 +174,30 @@ FOR ALL USING (
 CREATE POLICY borrows_select_all ON borrows
     FOR SELECT USING (auth.uid() IS NOT NULL);  
 CREATE POLICY borrows_manage_owners_or_librarians ON borrows
-FOR ALL USING (patron_user_id = auth.uid() 
-    OR EXISTS (SELECT 1 FROM book_copies bc JOIN libraries l ON l.id = bc.library_id
-        WHERE bc.id = borrows.copy_id AND (l.owner_id = auth.uid() 
-            OR EXISTS (SELECT 1 FROM library_members lm 
-                        JOIN libraries ll ON ll.id = lm.library_id
-                            WHERE ll.id = bc.library_id AND lm.user_id = auth.uid()
-                                  AND lm.role IN ('librarian','system_admin'))))
+FOR ALL USING (
+    patron_user_id = auth.uid()
+    OR copy_id IN (
+        SELECT id FROM book_copies WHERE library_id IN (
+            SELECT id FROM libraries WHERE owner_id = auth.uid()
+        )
+    )
+    OR copy_id IN (
+        SELECT bc.id FROM book_copies bc
+        JOIN libraries lib ON lib.id = bc.library_id  
+        JOIN library_members lm ON lm.library_id = lib.id
+        WHERE lm.user_id = auth.uid() AND lm.role IN ('librarian','system_admin')
+    )
 );
 
 --holds: patrons manage own; owners/librarians manage all in library
 CREATE POLICY holds_select_all ON holds 
     FOR SELECT USING (auth.uid() IS NOT NULL);
 CREATE POLICY holds_manage_owners_or_librarians ON holds FOR ALL
-USING ((SELECT l.owner_id FROM libraries l 
-        WHERE l.id = book_copies.library_id) = auth.uid()
+USING (
+    EXISTS (
+        SELECT 1 FROM libraries lib 
+        WHERE lib.id = library_id AND lib.owner_id = auth.uid()
+    )
     OR EXISTS (
         SELECT 1 FROM library_members lm 
         JOIN libraries ll ON ll.id = lm.library_id 
