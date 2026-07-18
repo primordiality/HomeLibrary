@@ -45,11 +45,15 @@ create table if not exists profiles (
     created_at timestamptz not null default now()
 );
 
--- Auth trigger: auto-create profiles row on signup
+|-- Auth trigger: auto-create profiles row on signup (idempotent with ON CONFLICT)
 create or replace function handle_new_user()
 returns trigger as $$
 begin
-  insert into profiles (id, name) values (NEW.id, coalesce(NEW.raw_login_email, ''));
+  insert into profiles (id, name, email)
+  values (NEW.id, coalesce(NEW.raw_login_email, ''), NEW.email)
+  on conflict (id) do update
+    set name = coalesce(excluded.name, profiles.name),
+        email = excluded.email;
   return NEW;
 end;
 $$ language plpgsql security definer;
@@ -57,6 +61,13 @@ $$ language plpgsql security definer;
 drop trigger if exists handle_new_user_trigger on auth.users;
 create trigger handle_new_user_trigger after insert on auth.users
 for each row execute procedure handle_new_user();
+
+-- 3a. Backfill profiles for any existing auth.users (resolves FK violations)
+insert into profiles (id, name, email, role)
+select au.id, coalesce(au.email, ''), au.email, 'library_owner'
+from auth.users au
+left join profiles p on p.id = au.id
+where p.id is null;
 
 -- 2. Libraries — one per physical house/person
 create table if not exists libraries (

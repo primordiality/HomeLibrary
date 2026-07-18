@@ -15,24 +15,36 @@ DROP TABLE IF EXISTS library_members CASCADE;
 DROP TABLE IF EXISTS libraries CASCADE;
 DROP TABLE IF EXISTS profiles CASCADE;
 
--- 2. PROFILES (extends auth.users with name + role)
-CREATE TABLE profiles (
-    id uuid PRIMARY KEY REFERENCES auth.users(id),
-    name text DEFAULT '',
-    email text,
-    role text CHECK (role IN ('system_admin','library_owner','librarian','patron')),
-    created_at timestamptz NOT NULL DEFAULT now()
-);
+|-- 2. PROFILES (extends auth.users with name + role)
+|CREATE TABLE IF NOT EXISTS profiles (
+|    id uuid PRIMARY KEY REFERENCES auth.users(id),
+|    name text DEFAULT '',
+|    email text,
+|    role text CHECK (role IN ('system_admin','library_owner','librarian','patron')),
+|    created_at timestamptz NOT NULL DEFAULT now()
+|);
 
--- ═══ AUTH TRIGGER: auto-create profiles row on signup ║═
-CREATE OR REPLACE FUNCTION handle_new_user() RETURNS TRIGGER AS $$
-BEGIN
-  INSERT INTO profiles (id, name, email)
-  VALUES (NEW.id, COALESCE(NEW.raw_user_meta_attr->>'display_name', ''), NEW.email);
-  RETURN NEW;
-END;
-$$ LANGUAGE plpgsql SECURITY DEFINER;
+|-- 2a. FIX: Backfill missing profiles for existing auth.users
+|-- Run this in Supabase SQL Editor once to resolve FK violations on libraries.owner_id
+|INSERT INTO profiles (id, name, email, role)
+|SELECT au.id, COALESCE(au.email, ''), au.email, 'library_owner'
+|FROM auth.users au
+|LEFT JOIN profiles p ON p.id = au.id
+|WHERE p.id IS NULL;
 
+|-- 2b. Idempotent trigger for future signups (ON CONFLICT prevents duplicates)
+|CREATE OR REPLACE FUNCTION handle_new_user() RETURNS TRIGGER AS $$
+|BEGIN
+|  INSERT INTO profiles (id, name, email)
+|  VALUES (NEW.id, COALESCE(NEW.raw_user_meta_attr->>'display_name', ''), NEW.email)
+|  ON CONFLICT (id) DO UPDATE
+|    SET name = COALESCE(EXCLUDED.name, profiles.name),
+|        email = EXCLUDED.email;
+|  RETURN NEW;
+|END;
+|$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+|-- ═══ AUTH TRIGGER: wire handle_new_user() to auth.users ║═
 DROP TRIGGER IF EXISTS handle_new_user_trigger ON auth.users CASCADE;
 CREATE TRIGGER handle_new_user_trigger
   AFTER INSERT ON auth.users
