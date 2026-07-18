@@ -50,14 +50,15 @@ CREATE TRIGGER handle_new_user_trigger
   AFTER INSERT ON auth.users
   FOR EACH ROW EXECUTE PROCEDURE handle_new_user();
 
--- 3. LIBRARIES 
-CREATE TABLE libraries (
+|-- 2. LIBRARIES 
+CREATE TABLE IF NOT EXISTS libraries (
     id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
     name text NOT NULL,
     address text,
     description text,
     phone text,
     owner_id uuid REFERENCES profiles(id),
+    is_archived BOOLEAN NOT NULL DEFAULT FALSE, -- soft delete guard: must be true before library can be removed
     created_at timestamptz NOT NULL DEFAULT now(),
     updated_at timestamptz NOT NULL DEFAULT now()
 );

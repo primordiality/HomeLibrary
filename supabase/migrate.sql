@@ -78,6 +78,7 @@ create table if not exists libraries (
     description text null,
     phone text null,
     notes text null,
+    is_archived boolean not null default false, -- soft delete: hidden from listings; books cannot be moved FROM archived libraries
     created_at timestamptz not null default now(),
     updated_at timestamptz not null default now()
 );
