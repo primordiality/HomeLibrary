@@ -45,6 +45,19 @@ create table if not exists profiles (
     created_at timestamptz not null default now()
 );
 
+-- Auth trigger: auto-create profiles row on signup
+create or replace function handle_new_user()
+returns trigger as $$
+begin
+  insert into profiles (id, name) values (NEW.id, coalesce(NEW.raw_login_email, ''));
+  return NEW;
+end;
+$$ language plpgsql security definer;
+
+drop trigger if exists handle_new_user_trigger on auth.users;
+create trigger handle_new_user_trigger after insert on auth.users
+for each row execute procedure handle_new_user();
+
 -- 2. Libraries — one per physical house/person
 create table if not exists libraries (
     id uuid primary key default uuid_generate_v4(),

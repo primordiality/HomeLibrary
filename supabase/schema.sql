@@ -24,6 +24,20 @@ CREATE TABLE profiles (
     created_at timestamptz NOT NULL DEFAULT now()
 );
 
+-- ═══ AUTH TRIGGER: auto-create profiles row on signup ║═
+CREATE OR REPLACE FUNCTION handle_new_user() RETURNS TRIGGER AS $$
+BEGIN
+  INSERT INTO profiles (id, name, email)
+  VALUES (NEW.id, COALESCE(NEW.raw_user_meta_attr->>'display_name', ''), NEW.email);
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+DROP TRIGGER IF EXISTS handle_new_user_trigger ON auth.users CASCADE;
+CREATE TRIGGER handle_new_user_trigger
+  AFTER INSERT ON auth.users
+  FOR EACH ROW EXECUTE PROCEDURE handle_new_user();
+
 -- 3. LIBRARIES 
 CREATE TABLE libraries (
     id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
