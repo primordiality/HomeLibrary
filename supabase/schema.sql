@@ -1,222 +1,161 @@
--- Home Library — Clean Install / Re-run Schema
--- Safe to paste into Supabase SQL Editor multiple times.
--- Drops ALL custom objects first, then creates everything fresh.
+-- Home Library — Complete Database Schema (Idempotent)
+-- Safe to paste into supabase.com SQL Editor multiple times.
+-- Drops all custom objects first, then creates everything fresh.
 
-drop trigger if exists update_updated_at_libraries on libraries;
-drop trigger if exists update_copies_updated_at on book_copies;
-drop trigger if exists update_borrows_timestamps on borrows;
-drop trigger if exists update_holds_timestamps on holds;
+DROP FUNCTION IF EXISTS set_updated_at_ts() CASCADE;
+DROP TABLE IF EXISTS holds CASCADE;
+DROP TABLE IF EXISTS borrows CASCADE;
+DROP TABLE IF EXISTS book_copies CASCADE;
+DROP TABLE IF EXISTS books CASCADE;
+DROP TABLE IF EXISTS locations CASCADE;
+DROP TABLE IF EXISTS library_members CASCADE;
+DROP TABLE IF EXISTS libraries CASCADE;
+DROP TABLE IF EXISTS profiles CASCADE;
 
-drop policy if exists profiles_select_all on profiles;
-drop policy if exists profiles_insert_auth_user on profiles;
-drop policy if exists profiles_update_own on profiles;
-drop policy if exists profiles_manage_by_owner_or_admin on profiles;
-drop policy if exists libraries_viewable_by_all_authed on libraries;
-drop policy if exists libraries_editable_by_owner on libraries;
-drop policy if exists library_members_select_all on library_members;
-drop policy if exists library_members_managed by_owners_and_librarians on library_members;
-drop policy if exists books_viewable_by_all on books;
-drop policy if exists book_copies_viewable by_auth_or_member on book_copies;
-drop policy if exists borrows_select_own on borrows;
-drop policy if exists borrows_insert_own on borrows;
-drop policy if exists borrows_manage_by_owner or librarian on borrows;
-drop policy if exists holds_select_own on holds;
-drop policy if exists holds insert_own on holds;
+CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 
--- drop the timestamp function if it exists so we can recreate cleanly
-drop function if exists update_updated_at_column() cascade;
-
--- Now drop tables in reverse dependency order
-drop table if exists holds cascade;
-drop table if exists borrows cascade;  
-drop table if exists book_copies cascade;
-drop table if exists locations cascade;
-drop table if exists libraries cascade;
-drop table if exists library_members cascade;
-drop table if exists profiles cascade;
-
--- Enable UUID extension
-create extension if not exists "uuid-ossp";
-
--- ─── PROFILES ──────────────────────
-create table profiles (
-    id uuid primary key references auth.users(id) on delete cascade,
-    name text not null default '',
+-- ─── PROFILES (extends auth.users with name + role) ───
+CREATE TABLE profiles (
+    id uuid PRIMARY KEY REFERENCES auth.users(id) ON DELETE CASCADE,
+    name text NOT NULL DEFAULT '',
     email text,
-    role text not null check (role in (
-        'system_admin', 'library_owner', 'librarian', 'patron'
-    )),
-    created_at timestamptz not null default now()
+    role text CHECK (role IN ('system_admin','library_owner','librarian','patron')),
+    created_at timestamptz NOT NULL DEFAULT now()
 );
 
--- ─── LIBRARIES ──────────────────────  
-create table libraries (
-    id uuid primary key default uuid_generate_v4(),
-    owner_id uuid references profiles(id) on delete cascade,
-    name text not null,
-    address text,
-    description text,
-    phone text,
-    notes text,
-    created_at timestamptz not null default now(),
-    updated_at timestamptz not null default now()
+-- ─── LIBRARIES ───
+CREATE TABLE libraries (
+    id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    owner_id uuid REFERENCES profiles(id) ON DELETE CASCADE,
+    name text NOT NULL,
+    address text, description text, phone text, notes text,
+    created_at timestamptz NOT NULL DEFAULT now(),
+    updated_at timestamptz NOT NULL DEFAULT now()
 );
 
--- ─── Library Members ──────────────────────
-create table library_members (
-    id uuid primary key default uuid_generate_v4(),
-    library_id uuid references libraries(id) on delete cascade,
-    user_id uuid references profiles(id) on delete cascade,
-    role text not null check (role in (
-        'library_owner', 'librarian', 'patron'
-    )),
-    created_at timestamptz not null default now()
+-- ─── Library Members (who belongs to which library) ───
+CREATE TABLE library_members (
+    id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    library_id uuid REFERENCES libraries(id) ON DELETE CASCADE,
+    user_id uuid REFERENCES profiles(id) ON DELETE CASCADE,
+    role text CHECK (role IN ('library_owner','librarian','patron')),
+    created_at timestamptz NOT NULL DEFAULT now()
 );
 
--- ─── Locations ──────────────────────
-create table locations (
-    id uuid primary key default uuid_generate_v4(),
-    library_id uuid references libraries(id) on delete cascade,
-    name text not null,
-    floor_or_zone text,
-    notes text,
-    created_at timestamptz not null default now()
+-- ─── LOCATIONS (rooms/shelves/zones) ───
+CREATE TABLE locations (
+    id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    library_id uuid REFERENCES libraries(id) ON DELETE CASCADE,
+    name text NOT NULL, floor_or_zone text, notes text,
+    created_at timestamptz NOT NULL DEFAULT now()
 );
 
--- ─── Books (master record per ISBN) ──────────────────────
-create table books (
-    isbn text primary key,
-    title text,
-    subtitle text,
-    authors text[] default '{}',
-    publisher text,
-    publish_date date,
-    pages integer,
-    language text,
-    cover_url text,
-    genres text[] default '{}',
-    notes text,
-    created_at timestamptz not null default now()
+-- ─── BOOKS (master record per ISBN) ───
+CREATE TABLE books (
+    isbn text PRIMARY KEY, title text, subtitle text,
+    authors text[] DEFAULT '{}', publisher text, publish_date date,
+    pages integer, language text, cover_url text,
+    genres text[] DEFAULT '{}', notes text,
+    created_at timestamptz NOT NULL DEFAULT now()
 );
 
--- ─── Book Copies (individual physical items) ──────────────────────  
-create table book_copies (
-    id uuid primary key default uuid_generate_v4(),
-    book_isbn text references books(isbn) on delete cascade,
-    library_id uuid references libraries(id) on delete cascade,
-    location_id uuid references locations(id) on delete set null,
-    barcode text,
-    condition text not null check (
-        condition in ('new', 'good', 'fair', 'poor', 'damaged')
-    ),
-    notes text,
-    purchase_price numeric(10,2),
-    acquired_date date,
-    created_at timestamptz not null default now(),
-    updated_at timestamptz not null default now()
+-- ─── BOOK COPIES (individual physical items per library) ───
+CREATE TABLE book_copies (
+    id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    book_isbn text REFERENCES books(isbn) ON DELETE CASCADE,
+    library_id uuid REFERENCES libraries(id) ON DELETE CASCADE,
+    location_id uuid REFERENCES locations(id) ON DELETE SET NULL,
+    barcode text, condition text CHECK (condition IN ('new','good','fair','poor','damaged')),
+    notes text, purchase_price numeric(10,2), acquired_date date,
+    created_at timestamptz NOT NULL DEFAULT now(), updated_at timestamptz NOT NULL DEFAULT now()
 );
 
--- ─── Borrows (checkout/return tracking) ──────────────────────
-create table borrows (
-    id uuid primary key default uuid_generate_v4(),
-    patron_user_id uuid references profiles(id) on delete cascade,
-    copy_id uuid references book_copies(id) on delete cascade,
-    checkout_date date not null,
-    nudge_by_date date,
-    return_date date,
-    created_at timestamptz not null default now(),
-    updated_at timestamptz not null default now()
+-- ─── BORROWS (checkout/return with soft nudge dates) ───
+CREATE TABLE borrows (
+    id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    patron_user_id uuid REFERENCES profiles(id) ON DELETE CASCADE,
+    copy_id uuid REFERENCES book_copies(id) ON DELETE CASCADE,
+    checkout_date date NOT NULL,
+    nudge_by_date date, return_date date,
+    created_at timestamptz NOT NULL DEFAULT now(),
+    updated_at timestamptz NOT NULL DEFAULT now()
 );
 
--- ─── Holds (reserves for checked out books) ──────────────────────
-create table holds (
-    id uuid primary key default uuid_generate_v4(),
-    patron_user_id uuid references profiles(id) on delete cascade,
-    book_isbn text references books(isbn) on delete cascade,
-    library_id uuid references libraries(id) on delete cascade,
-    status text not null check (status in (
-        'waiting', 'accepted', 'cancelled'
-    )),
-    created_at timestamptz not null default now(),
-    updated_at timestamptz not null default now()  
+-- ─── HOLDS (reserves for already checked-out books) ───  
+CREATE TABLE holds (
+    id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    patron_user_id uuid REFERENCES profiles(id) ON DELETE CASCADE,
+    book_isbn text REFERENCES books(isbn) ON DELETE CASCADE,
+    library_id uuid REFERENCES libraries(id) ON DELETE CASCADE,
+    status text CHECK (status IN ('waiting','accepted','cancelled')),
+    created_at timestamptz NOT NULL DEFAULT now(),
+    updated_at timestamptz NOT NULL DEFAULT now()
 );
 
+-- ═══ RLS ENABLE ALL TABLES ════
+ALTER TABLE profiles ENABLE ROW LEVEL SECURITY;
+ALTER TABLE libraries ENABLE ROW LEVEL SECURITY;
+ALTER TABLE library_members ENABLE ROW LEVEL SECURITY;
+ALTER TABLE locations ENABLE ROW LEVEL SECURITY;
+ALTER TABLE books ENABLE ROW LEVEL SECURITY;  
+ALTER TABLE book_copies ENABLE ROW LEVEL SECURITY;
+ALTER TABLE borrows ENABLE ROW LEVEL SECURITY;
+ALTER TABLE holds ENABLE ROW LEVEL SECURITY;
 
--- ============================================
--- ROW LEVEL SECURITY
--- ============================================
-alter table profiles enable row level security;
-alter table libraries enable row level security;
-alter table library_members enable row level security;
-alter table locations enable row level security;
-alter table books enable row level security;
-alter table book_copies enable row level security;
-alter table borrows enable row level security;
-alter table holds enable row level security;
+-- ─── PROFILE POLICIES ───
+CREATE POLICY profile_select ON profiles FOR SELECT USING (true);
+CREATE POLICY profile_insert ON profiles FOR INSERT WITH CHECK (auth.uid() IS NOT NULL);
+CREATE POLICY profile_update ON profiles FOR UPDATE
+    USING (EXISTS(SELECT 1 FROM profiles p WHERE p.id = auth.uid() AND p.role IN ('system_admin','library_owner')));
+CREATE POLICY profile_delete ON profiles FOR DELETE
+    USING (EXISTS(SELECT 1 FROM profiles p WHERE p.id = auth.uid() AND p.role IN ('system_admin','library_owner')));
 
--- PROFILES policies: any auth user can INSERT (for the DB trigger), users can manage their own profile
-create policy "profiles_select_all" on profiles for select using (true);
-create policy "profiles_insert_auth_user" on profiles for insert with check (auth.uid() is not null);
-create policy "profiles_update_own" on profiles for update using (auth.uid() = id) with check (auth.uid() = id);
-create policy "profiles_manage_by_owner_or_admin" on profiles for all
-    using (exists (select 1 from profiles p where p.id = auth.uid() and p.role in ('library_owner', 'system_admin')));
+-- ─── LIBRARIES POLICIES ───
+CREATE POLICY libraries_select ON libraries FOR SELECT USING (auth.uid() IS NOT NULL);
+CREATE POLICY libraries_all ON libraries FOR ALL USING ("owner_id" = auth.uid());
 
--- LIBRARIES policies: anyone authenticated can view; owner can do everything
-create policy "libraries_viewable_by_all_authed" on libraries for select using (auth.uid() is not null);
-create policy "libraries_editable_by_owner" on libraries for all using (owner_id = auth.uid());
+-- ─── Library MEMBERS POLICIES ───
+CREATE POLICY members_select ON library_members FOR SELECT USING (true);
+CREATE POLICY members_manage ON library_members FOR ALL
+    USING ((SELECT l.owner_id FROM libraries l WHERE l.id = library_members.library_id) = auth.uid());
 
--- LIBRARY MEMBERS: only owners and librarians manage membership
-create policy "library_members_select_all" on library_members for select using (true);
-create policy "library_members_managed_by_owners_and_librarians" on library_members for all
-    using (exists (select 1 from libraries l where l.id = library_members.library_id and l.owner_id = auth.uid()));
+-- ─── LOCATIONS POLICIES ───  
+CREATE POLICY locations_select ON locations FOR SELECT USING (auth.uid() IS NOT NULL);
+CREATE POLICY locations_all ON locations FOR ALL
+    USING ((SELECT l.owner_id FROM libraries l WHERE l.id = library_id) = auth.uid());
 
--- BOOKS: anyone authenticated can view; owners/librarians manage
-create policy "books_viewable_by_all_authed" on books for select using (auth.uid() is not null);
+-- ─── BOOKS POLICIES ───
+CREATE POLICY books_select ON books FOR SELECT USING (true);
+CREATE POLICY books_all ON books FOR ALL
+    USING ((SELECT l2."owner_id" FROM libraries l2 JOIN book_copies bc ON bc.library_id = l2.id WHERE bc.book_isbn = books.isbn) = auth.uid());
 
--- BOOK COPIES: library members + admins
-create policy "copies_viewable_by_auth_or_member" on book_copies for select
-    using (exists (select 1 from libraries l join library_members lm on lm.library_id = l.id
-                    where l.id = book_copies.library_id and lm.user_id = auth.uid()));
+-- ─── Book COPIES POLICIES ───  
+CREATE POLICY copies_select ON book_copies FOR SELECT
+    USING (EXISTS(SELECT 1 FROM libraries l3 JOIN library_members lm ON lm.library_id = l3.id 
+                   WHERE l3.id = book_copies.library_id AND lm.user_id = auth.uid()));
+CREATE POLICY copies_all ON book_copies FOR ALL
+    USING (EXISTS(SELECT 1 FROM libraries l4 JOIN library_members lm2 ON lm2.library_id = l4.id 
+                   WHERE l4.id = book_copies.library_id AND lm2.user_id = auth.uid()));
 
--- BORROWS: patrons see their own, owners/librarians manage all
-create policy "borrows_select_own" on borrows for select using (patron_user_id = auth.uid());
-create policy "borrows_insert_own" on borrows for insert with check (patron_user_id = auth.uid());
-create policy "borrows_manage_by_owner_or_librarian" on borrows for all
-    using (exists (select 1 from book_copies bc join libraries l2 on l2.id = bc.library_id
-                    where bc.id = borrows.copy_id and
-                          l2.owner_id = auth.uid()));
+-- ─── BORROWS POLICIES ───
+CREATE POLICY borrows_select_own ON borrows FOR SELECT USING (patron_user_id = auth.uid());
+CREATE POLICY borrows_insert_own ON borrows FOR INSERT WITH CHECK (patron_user_id = auth.uid());
+CREATE POLICY borrows_manage ON borrows FOR ALL
+    USING ((SELECT l5."owner_id" FROM libraries l5 JOIN book_copies bc2 ON bc2.library_id = l5.id 
+            WHERE bc2.id = borrows.copy_id) = auth.uid());
 
--- HOLDS
-create policy "holds_select_own" on holds for select using (patron_user_id = auth.uid());
-create policy "holds_insert_own" on holds for insert with check (patron_user_id = auth.uid());
+-- ─── HOLDS POLICIES ───
+CREATE POLICY holds_select_own ON holds FOR SELECT USING (patron_user_id = auth.uid());  
+CREATE POLICY holds_insert_own ON holds FOR INSERT WITH CHECK (patron_user_id = auth.uid());
+CREATE POLICY holds_manage ON holds FOR ALL
+    USING ((SELECT l6."owner_id" FROM libraries l6 WHERE l6.id = holds.library_id) = auth.uid());
 
--- ============================================
--- AUTO-UPDATE TRIGGERS
--- ============================================
-create or replace function update_updated_at_column()
-returns trigger as $$
-begin
-    new.updated_at = now();
-    return new;
-end;
-$$ language plpgsql;
+-- ─── AUTO-UPDATE TRIGGER FUNCTION ───  
+CREATE OR REPLACE FUNCTION set_updated_at_ts()
+RETURNS TRIGGER LANGUAGE plpgsql AS $$ BEGIN NEW.updated_at = now(); RETURN NEW; END; $$;
 
-create trigger set_updated_at_libraries before update on libraries
-    for each row execute procedure update_updated_at_column();
+CREATE TRIGGER tr_libraries_timestamp BEFORE UPDATE ON libraries 
+    FOR EACH ROW EXECUTE PROCEDURE set_updated_at_ts();
 
-create trigger set_updated_at_book_copies before update on book_copies
-    for each row execute procedure update_updated_at_column();
-
-create trigger set_updated_at_borrows before update on borrows
-    for each row execute procedure update_updated_at_column();
-
-create trigger set_updated_at_holds before update on holds
-    for each row execute procedure update_updated_at_column();
-
--- ============================================
--- INDEXES
--- ============================================
-create index idx_copies_library_id on book_copies(library_id);
-create index idx_copies_location_id on book_copies(location_id);
-create index idx_borrows_patron_id on borrows(patron_user_id);
-create index idx_holds_book_isbn on holds(book_isbn);
+CREATE TRIGGER tr_book_copies_timestamp BEFORE UPDATE ON book_copies
+    FOR EACH ROW EXECUTE PROCEDURE set_updated_at_ts();
