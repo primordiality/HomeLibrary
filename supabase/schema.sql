@@ -160,13 +160,15 @@ CREATE POLICY book_copies_select_all ON book_copies
 FOR SELECT USING (auth.uid() IS NOT NULL);
 CREATE POLICY book_copies_manage_owners_or_librarians ON book_copies
 FOR ALL USING (
-    (SELECT l.owner_id FROM libraries l WHERE l.id = $L) = auth.uid()
-    OR EXISTS (
-        SELECT 1 FROM library_members lm 
-        JOIN libraries ll ON ll.id = lm.library_id 
-        WHERE ll.id = $L AND lm.user_id = auth.uid()
-              AND lm.role IN ('librarian','system_admin'))
-);
+SELECT l.owner_id FROM libraries l 
+      WHERE l.id = book_copies.library_id) = auth.uid()
+OR EXISTS (
+    SELECT 1 FROM library_members lm 
+    JOIN libraries ll ON ll.id = lm.library_id 
+    WHERE ll.id = book_copies.library_id 
+          AND lm.user_id = auth.uid()
+          AND lm.role IN ('librarian','system_admin')
+));
 
 --borrows: patrons see own; librarians/owners manage
 CREATE POLICY borrows_select_all ON borrows
@@ -174,7 +176,7 @@ CREATE POLICY borrows_select_all ON borrows
 CREATE POLICY borrows_manage_owners_or_librarians ON borrows
 FOR ALL USING (patron_user_id = auth.uid() 
     OR EXISTS (SELECT 1 FROM book_copies bc JOIN libraries l ON l.id = bc.library_id
-        WHERE bc.id = $L AND (l.owner_id = auth.uid() 
+        WHERE bc.id = borrows.copy_id AND (l.owner_id = auth.uid() 
             OR EXISTS (SELECT 1 FROM library_members lm 
                         JOIN libraries ll ON ll.id = lm.library_id
                             WHERE ll.id = bc.library_id AND lm.user_id = auth.uid()
@@ -186,11 +188,11 @@ CREATE POLICY holds_select_all ON holds
     FOR SELECT USING (auth.uid() IS NOT NULL);
 CREATE POLICY holds_manage_owners_or_librarians ON holds FOR ALL
 USING ((SELECT l.owner_id FROM libraries l 
-        WHERE l.id = $L) = auth.uid()
+        WHERE l.id = book_copies.library_id) = auth.uid()
     OR EXISTS (
         SELECT 1 FROM library_members lm 
         JOIN libraries ll ON ll.id = lm.library_id 
-        WHERE ll.id = $L AND lm.user_id = auth.uid()
+        WHERE ll.id = holds.library_id AND lm.user_id = auth.uid()
               AND lm.role IN ('librarian','system_admin')));
 
 -- ═══ AUTO-UPDATE TIMESTAMP TRIGGERS ║═
