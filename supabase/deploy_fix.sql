@@ -1,30 +1,27 @@
--- Run in Supabase SQL Editor (Dashboard) → fixes 2 issues:
--- 1) publish_date type (date → text so "1987" works)
--- 2) Replace FOR ALL RLS policy with per-operation policies so INSERT doesn't fail
+-- Run in Supabase SQL Editor (Dashboard) → fixes publish_date + RLS insert blockage
+-- This drops ALL books-related policies and recreates them cleanly.
 
-ALTER TABLE books ALTER COLUMN publish_date TYPE TEXT;
+-- Drop everything that might exist on the books table
+DO $$
+DECLARE
+    r RECORD;
+BEGIN
+    FOR r IN SELECT policyname FROM pg_policies WHERE tablename = 'books' AND schemaname = 'public'
+    LOOP
+        EXECUTE format('DROP POLICY IF EXISTS %I ON books', r.policyname);
+    END LOOP;
+END $$;
 
-DROP POLICY IF EXISTS books_manage_owned ON books;
-DROP POLICY IF EXISTS books_insert_all ON books;
-DROP POLICY IF EXISTS books_update_all ON books;
-DROP POLICY IF EXISTS books_update_owned ON books;
-DROP POLICY IF EXISTS books_delete_owned ON books;
-
+-- Recreate clean per-operation policies
 CREATE POLICY books_insert_all ON books 
     FOR INSERT WITH CHECK (auth.uid() IS NOT NULL);
 
 CREATE POLICY books_select_all ON books 
     FOR SELECT USING (auth.uid() IS NOT NULL);
 
-CREATE POLICY books_update_owned ON books 
-    FOR UPDATE
-    USING ((SELECT lib.owner_id FROM libraries lib 
-          JOIN book_copies bc ON bc.library_id = lib.id 
-          WHERE bc.book_isbn = books.isbn) = auth.uid())
+CREATE POLICY books_update_own ON books 
+    FOR UPDATE USING ((SELECT lib.owner_id FROM libraries lib JOIN book_copies bc ON bc.library_id = lib.id WHERE bc.book_isbn = books.isbn) = auth.uid()) 
     WITH CHECK (auth.uid() IS NOT NULL);
 
-CREATE POLICY books_delete_owned ON books 
-    FOR DELETE
-    USING ((SELECT lib.owner_id FROM libraries lib 
-          JOIN book_copies bc ON bc.library_id = lib.id 
-          WHERE bc.book_isbn = books.isbn) = auth.uid());
+CREATE POLICY books_delete_own ON books 
+    FOR DELETE USING ((SELECT lib.owner_id FROM libraries lib JOIN book_copies bc ON bc.library_id = lib.id WHERE bc.book_isbn = books.isbn) = auth.uid());
