@@ -93,9 +93,79 @@ async function searchWorks(query: string, opts?: { limit?: number}): Promise<any
   } catch { return null; }
 }
 
+// ── Work Search (Title / Author) ────────────────
+/**
+ * Search work metadata by title or title+author.
+ * Returns `{ key, title, subtitle, authors, ISBN, coverUrl }` for each hit —
+ * exactly what the manual-entry form needs to populate itself.
+ */
+async function searchWorksByTitle(
+  query: string,
+  opts?: { limit?: number; author?: string },
+): Promise<{
+  key: string;
+  title: string;
+  subtitle?: string;
+  authors?: string[];
+  ISBN?: string[];
+  publisher?: string[];
+  first_publish_year?: number | null;
+  cover_edition_id?: number | null;
+}[]> {
+  const cleaned = query.replace(/[-\s]/g, '').trim();
+  if (cleaned.length < 2) return [];
+
+  // Build q-param: title:XYZ is best; add author_name:ABC if provided
+  let qStr = `title:${encodeURIComponent(query)}`;
+  if (opts?.author) qStr += ` AND author_name:"${encodeURIComponent(opts.author)}"`;
+
+  try {
+    const params = new URLSearchParams();
+    params.set('q', qStr);
+    params.set('limit', `${opts?.limit ?? 10}`);
+    // Only return fields we care about (saves bandwidth)
+    params.set(
+      'fields',
+      'key,title,subtitle,author_name,isbn,publisher_name,' +
+        'first_publish_year,cover_edition_id,number_of_pages',
+    );
+
+    const res = await fetch(`${BASE}/search.json?${params.toString()}`);
+    const data: any = await ok(res);
+    if (!data?.docs) return [];
+
+    return data.docs.map(
+      (doc: any): {
+        key: string;
+        title: string;
+        subtitle?: string;
+        authors?: string[];
+        ISBN?: string[];
+        publisher?: string[];
+        first_publish_year?: number | null;
+        cover_edition_id?: number | null;
+      } => ({
+        key: doc.key,
+        title: doc.title ?? '',
+        subtitle: undefined, // not returned by search — fetch edition for that
+        authors: doc.author_name?.slice(0, 3),
+        ISBN: doc.isbn?.filter((i: string) =>
+          i.replace(/[^0-9]/g, '').length === 10 ||
+          i.replace(/[^0-9]/g, '').length === 13,
+        ),
+        publisher: doc.publisher_name ?? [],
+        first_publish_year: doc.first_publish_year,
+        cover_edition_id: doc.cover_edition_id,
+      }),
+    );
+  } catch {
+    return [];
+  }
+}
+
 // ── ISBN validation / stripping ────────────────
 function cleanIsbn(isbnRaw: string): string {
   return isbnRaw.replace(/[-\s]/g, '').trim();
 }
 
-export { fetchBookByIsbn, searchWorks, cleanIsbn };
+export { fetchBookByIsbn, searchWorks, searchWorksByTitle, cleanIsbn };

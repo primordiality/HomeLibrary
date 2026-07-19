@@ -82,14 +82,15 @@ CREATE TABLE locations (
     created_at timestamptz NOT NULL DEFAULT now()
 );
 
--- 6. BOOKS (master record per ISBN)
+|-- 6. BOOKS (master record per ISBN)
 CREATE TABLE books (
-    isbn text PRIMARY KEY,
-    title text,
+    id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    isbn text UNIQUE,   -- nullable for no-ISBN books; unique index handles upserts when ISBN exists
+    title text NOT NULL,
     subtitle text,
     authors text[] DEFAULT '{}',
     publisher text,
-    publish_date text,  -- text: stores year-only values from OpenLibrary without validation
+    publish_date text,   -- text: stores year-only values from OpenLibrary without validation
     pages integer,
     language text,
     cover_url text,
@@ -97,6 +98,8 @@ CREATE TABLE books (
     notes text,
     created_at timestamptz NOT NULL DEFAULT now()
 );
+
+CREATE INDEX books_isbn_idx ON books USING btree (isbn) WHERE isbn IS NOT NULL;
 
 -- 7. BOOK COPIES (physical items per library)
 CREATE TABLE book_copies (
