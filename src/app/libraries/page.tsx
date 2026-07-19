@@ -7,7 +7,11 @@ import { supabase } from "@/lib/supabase/client";
 import type { Library } from '@/types/db';
 
 export default function LibrariesPage() {
-  const { user, loading: authLoading } = useAuth();
+  let _user: any = null;
+  let _loading: boolean = true;
+  try { const ctx = useAuth(); _user = ctx.user; _loading = ctx.loading || false; } catch {}
+  const user = _user;
+  const authLoading = _loading;
   const [libraries, setLibraries] = useState<Library[]>([]);
   const [loadingData, setLoadingData] = useState(false);
   const [showForm, setShowForm] = useState(false);

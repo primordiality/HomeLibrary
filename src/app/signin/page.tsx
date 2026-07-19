@@ -9,7 +9,11 @@ export default function SignIn() {
   const [password, setPassword] = useState("");
   const [name, setName] = useState("");
   const [error, setError] = useState<string | null>(null);
-  const { signIn, signUp } = useAuth();
+  let _signIn: any = null;
+  let _signUp: any = null;
+  try { const ctx = useAuth(); _signIn = ctx.signIn; _signUp = ctx.signUp; } catch {}
+  const signIn = _signIn;
+  const signUp = _signUp;
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
