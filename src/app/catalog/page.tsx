@@ -20,14 +20,11 @@ export default function CatalogPage() {
     try {
       let query = supabase.from('books').select('*');
       
-       if (searchQuery) {
-        query = query.or(`title.ilike.%${searchQuery}%,isbn.eq.${searchQuery}`);
-          }
-
-       // Exclude archived books
-        query = query.eq("is_archived", false).or("is_archived.is.null");
+         if (searchQuery) {
+          query = query.or(`title.ilike.%${searchQuery}%,isbn.eq.${searchQuery}`);
+           	}
         
-       const { data } = await query;
+        const { data } = await query;
        
       if (data) setBooks(data);
      } catch (err) {

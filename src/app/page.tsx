@@ -16,11 +16,10 @@ export default function Dashboard() {
           .select("id", { count: "exact" })
           .eq("is_archived", false);
 
-        // Count total unique books (not book_copies to avoid counting duplicates)
+        // Count total unique books (just count all, no is_archived filter on books)
         const { count: bookCount } = await supabase
-          .from("books")
-          .select("id", { count: "exact" })
-          .eq("is_archived", false);
+           .from("books")
+           .select("id", { count: "exact" });
 
         setStats({
           libraries: libCount ?? 0,
