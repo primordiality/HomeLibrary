@@ -164,10 +164,60 @@ export default function ManageBooksPage() {
         // ─── Refresh after adding a new book ──────────────
   function onBookAdded() {
     setShowAddDialog(false);
-    loadAll();     // Refresh list immediately
+    loadAll();      // Refresh list immediately
    }
 
-        // ─── Loading guard ──────────────────────────
+        // ─── Inline Copy Edit Handlers ──────────────
+  function startEdit(copyId: string) {
+    setEditingCopies(new Set([copyId]));
+    const book = books.find(b => b.id === copyId);
+    if (book) setEditData({ ...book });
+   }
+
+  function cancelEdit() {
+    setEditingCopies(new Set());
+    setEditData({});
+   }
+
+  async function handleSaveEdit(copyId: string) {
+    const original = books.find((b: any) => b.id === copyId);
+    if (!original) return;
+
+     // Nothing changed? Skip save.
+     if (editData.condition === original.condition && 
+          editData.notes === original.notes &&
+          editData.barcode === original.barcode) {
+      cancelEdit();
+      return;
+     }
+
+    try {
+       const updates: Record<string, unknown> = {};
+      if (editData.condition !== original.condition) 
+        updates.condition = editData.condition || 'good';
+      if ((editData.notes ?? '') !== (original.notes ?? '')) 
+        updates.notes = editData.notes?.trim() || null;
+      if (editData.barcode !== original.barcode) 
+        updates.barcode = editData.barcode?.trim() || null;
+
+       const { error } = await supabase
+         .from('book_copies')
+           .update(updates)
+           .eq('id', copyId);
+
+       if (error) throw new Error(error.message);
+
+       setSuccessMessage('Copy updated!');
+        setTimeout(() => setSuccessMessage(null), 2000);
+      loadAll();    // Refresh list
+    } catch (err: unknown) {
+      setErrorMessage((err as Error).message || 'Save failed.');
+     } finally {
+       cancelEdit();
+       }
+   }
+
+       // ─── Loading guard ──────────────────────────
    if (loading) return <p className="text-sm text-slate-500">Loading...</p>;
    if (!library) return <p className="text-sm text-slate-500">Library not found.</p>;
 
@@ -226,35 +276,103 @@ export default function ManageBooksPage() {
                   {/* Book rows */}
                 <div className="divide-y divide-slate-100">
                       {books.map((book: any) => {
-                  const isChecked = selectedCopyIds.has(book.id);
-                   return (
-                    <div
-                     key={book.id}
-                        className={`flex items-center gap-3 px-3 py-3 ${isChecked ? "bg-indigo-50" : ""}`}
+                      const isChecked = selectedCopyIds.has(book.id);
+                      const isEditing = editingCopies.has(book.id);
+                      return (
+                      <div
+                      key={book.id}
+                       className={`px-3 py-3 border-b border-slate-100 ${isEditing ? "bg-green-50" : isChecked ? "bg-indigo-50" : ""}`}
                       >
-                        <input
-                          type="checkbox"
-                           checked={isChecked}
-                            onChange={() => toggleSelectCopy(book.id)}
-                             className="h-4 w-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500 flex-shrink-0"
-                            />
+                        {/* Checkbox + actions wrapper */}
+                        <div className={`flex items-center gap-2 ${!isEditing ? '' : 'mb-3'}`}>
+                          {!isEditing && (
+                            <input
+                             type="checkbox"
+                              checked={isChecked}
+                               onChange={() => toggleSelectCopy(book.id)}
+                                className="h-4 w-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500 flex-shrink-0"
+                                />
+                          )}
+
+                          {/* ─── VIEW MODE ─────────────────── */}
+                          {!isEditing && (<>
                            <div className="flex-1 min-w-0">
-                          <p className="text-sm font-medium text-slate-900 truncate">
-                            {book._bi?.title ?? 'Unknown Book'}
-                          </p>
-                          <p className="text-xs text-slate-500">{book.book_isbn ?? '-'}</p>
-                        </div>
-                      {/* Edit link */}
-                      {book.book_isbn && (
-                        <Link href={`/books/${book.book_isbn}/edit`} className="rounded-md border border-indigo-300 px-2.5 py-1 text-xs font-medium text-indigo-600 hover:bg-indigo-50 whitespace-nowrap">Edit</Link>
-                      )}
-                    <span className={`mt-0 inline-block px-2 py-0.5 rounded-full text-xs ${book.condition === 'new' ? 'bg-green-100 text-green-800' : book.condition === 'good' ? 'bg-blue-100 text-blue-800' : book.condition === 'fair' ? 'bg-yellow-100 text-yellow-800' : 'bg-red-100 text-red-800'}`}>
-                            {book.condition}
-                          </span>
-                        <span className="text-xs text-slate-400 mr-2 hidden sm:inline">{book.barcode ?? '-'}</span>
+                             <p className="text-sm font-medium text-slate-900 truncate">{book._bi?.title ?? 'Unknown Book'}</p>
+                             <p className="text-xs text-slate-500">{book.book_isbn ?? '-'}</p>
+                           </div>
+
+                           <div className="flex items-center gap-2 flex-shrink-0">
+                             {book.book_isbn && (
+                               <Link href={`/books/${book.book_isbn}/edit`} className="rounded-md border border-indigo-300 px-2.5 py-1 text-xs font-medium text-indigo-600 hover:bg-indigo-50 whitespace-nowrap">Edit</Link>
+                             )}
+
+                             <button
+                               onClick={() => startEdit(book.id)}
+                               className="rounded-md border border-slate-300 px-2.5 py-1 text-xs font-medium text-slate-600 hover:bg-slate-50 whitespace-nowrap">
+                               Edit Copy</button>
+
+                             <span className={`px-2 py-0.5 rounded-full text-xs ${book.condition === 'new' ? 'bg-green-100 text-green-800' : book.condition === 'good' ? 'bg-blue-100 text-blue-800' : book.condition === 'fair' ? 'bg-yellow-100 text-yellow-800' : 'bg-red-100 text-red-800'}`}>
+                               {book.condition}</span>
+                             <span className="text-xs text-slate-400 hidden sm:inline">{book.barcode ?? '-'}</span>
+                           </div>
+                         </>)}
+
+                          {/* ─── EDIT MODE ───────────────────── */}
+                          {isEditing && (<>
+                            <div className="flex items-center gap-2 mb-2">
+                              <button onClick={() => startEdit(book.id)} className="text-xs text-green-700 font-medium hover:underline">{'\\u{1F4DD}'} Editing</button>
+                              <span className="text-xs text-slate-500">• {book._bi?.title ?? 'Unknown'}</span>
+                            </div>
+
+                            {/* Condition select */}
+                            <div className="mb-2">
+                              <label className="block text-xs font-medium text-slate-600 mb-1">Condition</label>
+                              <select
+                                value={editData.condition || 'good'}
+                                onChange={(e) => setEditData({...editData, condition: e.target.value})}
+                                className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-green-500 focus:ring-green-500">
+                                 <option value="new">New</option>
+                                 <option value="good">Good</option>
+                                 <option value="fair">Fair</option>
+                                 <option value="poor">Poor</option>
+                                 <option value="damaged">Damaged</option>
+                               </select>
+                             </div>
+
+                            {/* Barcode */}
+                              <div className="mb-2">
+                              <label className="block text-xs font-medium text-slate-600 mb-1">Barcode</label>
+                                <input
+                                 type="text"
+                                  value={editData.barcode || ''}
+                                  onChange={(e) => setEditData({...editData, barcode: e.target.value})}
+                                   className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-green-500 focus:ring-green-500" />
+                           </div>
+
+                            {/* Notes */}
+                              <div className="mb-3">
+                              <label className="block text-xs font-medium text-slate-600 mb-1">Notes</label>
+                                <textarea
+                                   rows={2}
+                                  value={editData.notes || ''}
+                                    onChange={(e) => setEditData({...editData, notes: e.target.value})}
+                                     className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm resize-none focus:border-green-500 focus:ring-green-500" />
+                                </div>
+
+                            {/* Save / Cancel */}
+                              <div className="flex items-center gap-2">
+                                <button onClick={() => handleSaveEdit(book.id)} className="rounded-lg bg-green-600 px-4 py-2 text-sm font-medium text-white hover:bg-green-700 shadow-sm">Save</button>
+                                <button onClick={cancelEdit} className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium text-slate-600 hover:bg-slate-50">Cancel</button>
+                              </div>
+                             </>)}
                        </div>
-                     );
-                    })}
+
+                      {isEditing && (book.book_isbn && (
+                         <Link href={`/books/${book.book_isbn}/edit`} className="block text-center text-xs text-indigo-600 hover:text-indigo-800 py-1">Also edit book metadata</Link>
+                       ))}
+                      </div>
+                      );
+                      })}
                </div>
              </div>
           )}
