@@ -221,25 +221,37 @@ const AddBookDialogComponent = forwardRef<
     let isbnToUse: string | null = cleaned.length > 0 ? cleaned : null;
 
     try {
-      // 1) upsert books — works with ISBN or null
-      await supabase.from('books').upsert(
-        {
+       // 1) upsert books — works with ISBN or null
+        const bookData = {
           isbn: isbnToUse,
           title: form.title.trim(),
           subtitle: form.subtitle?.trim() || null,
           authors: form.authors.trim()
-            ? [form.authors.split(',')[0]!.trim()]
-            : [],
+             ? [form.authors.split(',')[0]!.trim()]
+             : [],
           publisher: form.publisher?.trim() || null,
           publish_date: form.publishDate?.trim() || null,
           pages: parseInt(form.pages, 10) || null,
           cover_url: form.coverUrl?.trim() || null,
-        },
-        { onConflict: 'isbn' }        // isbn UNIQUE — no-op update when ISBN is null
-      );
+        };
 
-      // 2) insert a book_copy for the selected library (if any chosen)
-      if (selectedLibraryId && cleaned.length > 0) {
+       // isbnToUse present → upsert with unique ISBN conflict target;
+       // null/empty ISBN → regular insert (no existing row possible since NULL != NULL)
+       let saveResult!: { error: unknown };
+       if (isbnToUse) {
+         saveResult = await supabase.from('books').upsert(bookData, { onConflict: 'isbn' });
+       } else {
+         saveResult = await supabase.from('books').insert(bookData);
+       }
+
+       // Explicit error check early — don't create book_copy if book insert fails
+       if (saveResult?.error) {
+        console.error('Book insert failed:', saveResult.error);
+        throw saveResult.error;
+       }
+
+       // 2) insert a book_copy for the selected library (only when ISBN exists)
+      if (isbnToUse && selectedLibraryId) {
         await supabase.from('book_copies').insert({
           book_isbn: cleaned,
           library_id: selectedLibraryId,
