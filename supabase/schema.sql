@@ -89,7 +89,7 @@ CREATE TABLE books (
     subtitle text,
     authors text[] DEFAULT '{}',
     publisher text,
-    publish_date date,
+    publish_date text,  -- text: stores year-only values from OpenLibrary without validation
     pages integer,
     language text,
     cover_url text,

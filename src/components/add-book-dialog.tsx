@@ -163,7 +163,7 @@ async function handleSubmit() {
       title: form.title.trim(),
        subtitle: form.subtitle?.trim() || null,
       authors: form.authors.trim() ? [form.authors.split(',')[0]!.trim()] : [],
-       publisher: null,
+        publisher: form.publisher?.trim() || null,
      publish_date: form.publishDate?.trim() || null,
       pages: parseInt(form.pages, 10) || null,
        cover_url: form.coverUrl?.trim() || null,
@@ -282,6 +282,7 @@ const handleModeSwitch = (m: DialogMode) => {
             {renderField('Subtitle', form.subtitle, 'subtitle')}
            {renderField('Authors', form.authors, 'authors')}
             {renderField('Publisher', form.publisher, 'publisher')}
+            {renderField('Publish Date', form.publishDate, 'publishDate')}
             {renderField('Pages', form.pages, 'pages')}
 
           {/* Submit button to proceed to review/save */}
@@ -323,7 +324,8 @@ const handleModeSwitch = (m: DialogMode) => {
            {renderField('Subtitle', form.subtitle, 'subtitle')}
            {renderField('Authors', form.authors, 'authors')}
           {renderField('Publisher', form.publisher, 'publisher')}
-           {renderField('Pages', form.pages, 'pages')}
+          {renderField('Publish Date', form.publishDate, 'publishDate')}
+          {renderField('Pages', form.pages, 'pages')}
         </div>
 
          {/* Error message */}
