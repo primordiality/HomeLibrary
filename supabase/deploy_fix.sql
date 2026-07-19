@@ -1,7 +1,10 @@
 -- Run in Supabase SQL Editor (Dashboard) → fixes publish_date + RLS insert blockage
--- This drops ALL books-related policies and recreates them cleanly.
+-- This changes column type and drops ALL books-related policies before recreating cleanly.
 
--- Drop everything that might exist on the books table
+-- 1) Change publish_date from date to text so year-only values like "2019" work
+ALTER TABLE books ALTER COLUMN publish_date TYPE TEXT;
+
+-- 2) Drop every existing books policy, then recreate per-operation
 DO $$
 DECLARE
     r RECORD;
@@ -12,7 +15,6 @@ BEGIN
     END LOOP;
 END $$;
 
--- Recreate clean per-operation policies
 CREATE POLICY books_insert_all ON books 
     FOR INSERT WITH CHECK (auth.uid() IS NOT NULL);
 
