@@ -218,40 +218,40 @@ const AddBookDialogComponent = forwardRef<
     }
 
     const cleaned = cleanIsbn(form.isbn);
-    let isbnToUse: string | null = cleaned.length > 0 ? cleaned : null;
+    const hasISBN = cleaned.length > 0;
 
     try {
-       // 1) upsert books — works with ISBN or null
-        const bookData = {
-          isbn: isbnToUse,
+         // Build base book record (no isbn — we add it only when present)
+       const bookData: Record<string, unknown> = {
           title: form.title.trim(),
           subtitle: form.subtitle?.trim() || null,
           authors: form.authors.trim()
-             ? [form.authors.split(',')[0]!.trim()]
-             : [],
+              ? [form.authors.split(',')[0]!.trim()]
+              : [],
           publisher: form.publisher?.trim() || null,
           publish_date: form.publishDate?.trim() || null,
           pages: parseInt(form.pages, 10) || null,
           cover_url: form.coverUrl?.trim() || null,
-        };
+         };
 
-       // isbnToUse present → upsert with unique ISBN conflict target;
-       // null/empty ISBN → regular insert (no existing row possible since NULL != NULL)
+         // ISBN present → upsert on unique isbn constraint for dedup safety
+         // No ISBN → bare insert; omitting isbn key avoids NOT NULL violations entirely
        let saveResult!: { error: unknown };
-       if (isbnToUse) {
-         saveResult = await supabase.from('books').upsert(bookData, { onConflict: 'isbn' });
-       } else {
+       if (hasISBN) {
+         const bookDataWithIsbn = { ...bookData, isbn: cleaned };
+         saveResult = await supabase.from('books').upsert(bookDataWithIsbn, { onConflict: 'isbn' });
+         } else {
+          delete bookData.isbn; // ensure isbn is not in payload (avoids null NOT NULL)
          saveResult = await supabase.from('books').insert(bookData);
-       }
+         }
 
-       // Explicit error check early — don't create book_copy if book insert fails
        if (saveResult?.error) {
-        console.error('Book insert failed:', saveResult.error);
+        console.error('Book insert/upsert failed:', saveResult.error);
         throw saveResult.error;
-       }
+         }
 
-       // 2) insert a book_copy for the selected library (only when ISBN exists)
-      if (isbnToUse && selectedLibraryId) {
+         // Insert book_copies only when ISBN exists
+      if (hasISBN && selectedLibraryId) {
         await supabase.from('book_copies').insert({
           book_isbn: cleaned,
           library_id: selectedLibraryId,
