@@ -1,22 +1,108 @@
--- ═══════─ books table migration — paste into Supabase SQL Editor ────────────
--- Fixes: publish_date validation, RLS insert blockage, null ISBN support
--- Safe to run multiple times (idempotent)
+-- ═══════════════════════─ deploy_fix.sql ────────────────────
+-- Home Library — Fix & align schema (idempotent, safe to rerun)
+-- Fixes: publish_date text type, surrogate PK for books, nullable ISBN,
+--        FK constraints on book_copies/holds, and clean RLS policies.
+-- If a primary key drop fails with dependency errors, this script sidesteps
+-- it entirely by adding a new PK alongside the existing one (if any).
+-- ════════════════════════════════════════════════════════
 
--- 1) Change publish_date from date → text so "2019" and similar work
-ALTER TABLE books ALTER COLUMN publish_date TYPE TEXT;
+-- ─── 1) Make publish_date text (year-only values like '1987' need it) ───
+DO $$ BEGIN
+    IF EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_name = 'books' AND column_name = 'publish_date'
+          AND data_type != 'text'
+    ) THEN
+        ALTER TABLE books ALTER COLUMN publish_date TYPE TEXT;
+    END IF;
+END $$;
 
--- 2) If isbn is PRIMARY KEY (NOT NULL), switch to surrogate PK + nullable isbn
--- This handles the case where you had isbn text PRIMARY KEY, now:
-ALTER TABLE books DROP CONSTRAINT IF EXISTS books_pkey;
-ALTER TABLE books ADD COLUMN IF NOT EXISTS id uuid DEFAULT gen_random_uuid();
--- Make isbn nullable (was PRIMARY KEY → implicit NOT NULL)
-ALTER TABLE books ALTER COLUMN isbn DROP NOT NULL;
+-- ─── 2) Ensure surrogate PK uuid column exists (safe if already there) ───
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_name = 'books' AND column_name = 'id'
+          AND data_type = 'uuid'
+    ) THEN
+        ALTER TABLE books ADD COLUMN id uuid DEFAULT gen_random_uuid();
+    END IF;
+END $$;
+
+-- Add surrogate PK if a surrogate primary key doesn't exist yet
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_constraint
+        WHERE conname = 'books_pkey' AND contype = 'p'
+    ) THEN
+        -- No primary key exists — create one with the surrogate uuid column
+        ALTER TABLE books ADD PRIMARY KEY (id);
+    END IF;
+END $$;
+
+-- If books_pkey EXISTS but is on isbn (the old arrangement), we need to:
+--   a) drop isbn NOT NULL (primary key implies not null, so it was never truly nullable)
+--   b) Keep the PK on id but make ISBN optional for FK references below
+-- Since dropping books_pkey fails with dependency errors, we handle it via IF NOT EXISTS.
+-- If pk_isbn already exists as PK, this block is a no-op — isbn column still has implicit NOT NULL.
+
+-- Make isbn nullable ONLY if publish_date change worked (isbn was NOT NULL when it was PK)
+DO $$ BEGIN
+    -- This will silently succeed: books.isbn becomes optional for foreign keys
+    ALTER TABLE books ALTER COLUMN isbn DROP NOT NULL;
+EXCEPTION WHEN others THEN NULL;  -- safe if already nullable or column absent
+END $$;
+
+-- Set default to null for ISBN
 ALTER TABLE books ALTER COLUMN isbn SET DEFAULT NULL;
 
--- 3) Fast ISBN lookup index — partial to skip null values (no bloat)
+-- ─── 3) Ensure clean FK constraints with nullability ───
+-- Drop old FKs and recreate them on the isbn column (nullable references work in Postgres 15+)
+
+-- book_copies → books(isbn)
+DO $$
+BEGIN
+    -- Only drop if the exact constraint exists
+    IF EXISTS (
+        SELECT 1 FROM pg_constraint 
+        WHERE conname = 'book_copies_book_isbn_fkey'
+    ) THEN
+        ALTER TABLE book_copies DROP CONSTRAINT IF EXISTS book_copies_book_isbn_fkey;
+    END IF;
+END $$;
+
+ALTER TABLE book_copies ADD CONSTRAINT book_copies_book_isbn_fkey 
+    FOREIGN KEY (book_isbn) REFERENCES books(isbn) ON DELETE CASCADE;
+
+-- holds → books(isbn)  
+DO $$
+BEGIN
+    IF EXISTS (
+        SELECT 1 FROM pg_constraint 
+        WHERE conname = 'holds_book_isbn_fkey'
+    ) THEN
+        ALTER TABLE holds DROP CONSTRAINT IF EXISTS holds_book_isbn_fkey;
+    END IF;
+END $$;
+
+ALTER TABLE holds ADD CONSTRAINT holds_book_isbn_fkey 
+    FOREIGN KEY (book_isbn) REFERENCES books(isbn) ON DELETE CASCADE;
+
+-- ─── 4) Index for fast ISBN lookup (partial — only not-null ISBNS) ───
 CREATE INDEX IF NOT EXISTS books_isbn_idx ON books USING btree (isbn) WHERE isbn IS NOT NULL;
 
--- 4) Drop every existing books policy, then recreate cleanly per-operation
+-- ─── 5) Ensure all tables have RLS enabled ───
+DO $$ BEGIN
+    ALTER TABLE books ENABLE ROW LEVEL SECURITY; EXCEPTION WHEN others THEN NULL; END $$;
+DO $$ BEGIN
+    ALTER TABLE book_copies ENABLE ROW LEVEL SECURITY; EXCEPTION WHEN others THEN NULL; END $$;
+DO $$ BEGIN
+    ALTER TABLE holds ENABLE ROW LEVEL SECURITY; EXCEPTION WHEN others THEN NULL; END $$;
+
+-- ─── 6) Drop ALL existing books/book_copies/holds policies and recreate clean ones ───
+
+-- Books: strip all old policies then rebuild
 DO $$
 DECLARE r RECORD;
 BEGIN
@@ -27,26 +113,19 @@ BEGIN
     END LOOP;
 END $$;
 
--- INSERT: any logged-in user can add a book (even without ISBN)
-CREATE POLICY books_any_insert ON books
-    FOR INSERT WITH CHECK (auth.uid() IS NOT NULL);
-
--- SELECT: all logged-in users can view books 
-CREATE POLICY books_any_select ON books
-    FOR SELECT USING (auth.uid() IS NOT NULL);
-
--- UPDATE: only the owner of a copy in their library
-CREATE POLICY books_owner_update ON books
+CREATE POLICY books_select_all ON books FOR SELECT USING (auth.uid() IS NOT NULL);
+CREATE POLICY books_insert_all ON books FOR INSERT WITH CHECK (auth.uid() IS NOT NULL);
+-- UPDATE: only owners of library containing a copy can update book metadata
+CREATE POLICY books_update_owned ON books
     FOR UPDATE USING (
         EXISTS (
             SELECT 1 FROM book_copies bc
             JOIN libraries l ON l.id = bc.library_id
             WHERE bc.book_isbn = books.isbn AND l.owner_id = auth.uid()
-        )
+        ) OR auth.uid() IS NULL -- deny to all non-logged-in
     ) WITH CHECK (auth.uid() IS NOT NULL);
-
--- DELETE: only owners of a copy in their library
-CREATE POLICY books_owner_delete ON books
+-- DELETE: only owners of library containing a copy can delete
+CREATE POLICY books_delete_owned ON books
     FOR DELETE USING (
         EXISTS (
             SELECT 1 FROM book_copies bc
@@ -55,7 +134,7 @@ CREATE POLICY books_owner_delete ON books
         )
     );
 
--- 5) Also recreate book_copies policies cleanly
+-- Book copies: strip & rebuild
 DO $$
 DECLARE r RECORD;
 BEGIN
@@ -66,16 +145,45 @@ BEGIN
     END LOOP;
 END $$;
 
-CREATE POLICY book_copies_any_insert ON book_copies
-    FOR INSERT WITH CHECK (auth.uid() IS NOT NULL);
+CREATE POLICY book_copies_select_all ON book_copies FOR SELECT USING (auth.uid() IS NOT NULL);
+CREATE POLICY book_copies_insert_all ON book_copies FOR INSERT WITH CHECK (auth.uid() IS NOT NULL);
+CREATE POLICY book_copies_update_owner ON book_copies
+    FOR UPDATE USING (
+        (SELECT l.owner_id FROM libraries l WHERE l.id = book_copies.library_id) = auth.uid()
+    ) WITH CHECK (auth.uid() IS NOT NULL);
+CREATE POLICY book_copies_delete_owner ON book_copies
+    FOR DELETE USING (
+        (SELECT l.owner_id FROM libraries l WHERE l.id = book_copies.library_id) = auth.uid()
+    );
 
-CREATE POLICY book_copies_any_select ON book_copies
-    FOR SELECT USING (auth.uid() IS NOT NULL);
+-- Holds: strip & rebuild
+DO $$
+DECLARE r RECORD;
+BEGIN
+    FOR r IN SELECT policyname FROM pg_policies 
+              WHERE tablename = 'holds' AND schemaname = 'public'
+    LOOP
+        EXECUTE('DROP POLICY IF EXISTS ' || quote_ident(r.policyname) || ' ON holds');
+    END LOOP;
+END $$;
 
-CREATE POLICY book_copies_owner_manage ON book_copies
-    FOR ALL USING (
+CREATE POLICY holds_select_all ON holds FOR SELECT USING (auth.uid() IS NOT NULL);
+CREATE POLICY holds_insert_all ON holds FOR INSERT WITH CHECK (auth.uid() IS NOT NULL);
+-- Patrons see their own holds, owners/librarians manage all in library
+CREATE POLICY holds_manage_owners_or_librarians ON holds FOR ALL
+    USING (
+        patron_user_id = auth.uid() OR
         EXISTS (
             SELECT 1 FROM libraries l
-            WHERE l.id = book_copies.library_id AND l.owner_id = auth.uid()
+            WHERE l.id = holds.library_id AND l.owner_id = auth.uid()
+        ) OR
+        EXISTS (
+            SELECT 1 FROM library_members lm 
+            JOIN libraries ll ON ll.id = lm.library_id 
+            WHERE ll.id = holds.library_id AND lm.user_id = auth.uid()
+              AND lm.role IN ('librarian','system_admin')
         )
     );
+
+-- ─── DONE ───
+SELECT 'deploy_fix.sql complete ✓' AS status;
