@@ -31,7 +31,11 @@ export default function ManageBooksPage() {
   const [moveTargetLibId, setMoveTargetLibId] = useState('');
 
     // Add book dialog
-  const [showAddDialog, setShowAddDialog] = useState(false);
+   const [showAddDialog, setShowAddDialog] = useState(false);
+
+       // Inline editing state
+   const [editingCopies, setEditingCopies] = useState<Set<string>>(new Set());
+   const [editData, setEditData] = useState<Record<string, any>>({});
 
        // ─── Load everything on mount ─────────────
   useEffect(() => {
@@ -240,6 +244,10 @@ export default function ManageBooksPage() {
                           </p>
                           <p className="text-xs text-slate-500">{book.book_isbn ?? '-'}</p>
                         </div>
+                      {/* Edit link */}
+                      {book.book_isbn && (
+                        <Link href={`/books/${book.book_isbn}/edit`} className="rounded-md border border-indigo-300 px-2.5 py-1 text-xs font-medium text-indigo-600 hover:bg-indigo-50 whitespace-nowrap">Edit</Link>
+                      )}
                     <span className={`mt-0 inline-block px-2 py-0.5 rounded-full text-xs ${book.condition === 'new' ? 'bg-green-100 text-green-800' : book.condition === 'good' ? 'bg-blue-100 text-blue-800' : book.condition === 'fair' ? 'bg-yellow-100 text-yellow-800' : 'bg-red-100 text-red-800'}`}>
                             {book.condition}
                           </span>

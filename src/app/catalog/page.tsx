@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
+import Link from 'next/link';
 import { supabase } from '@/lib/supabase/client';
 import AddBookDialog from '@/components/add-book-dialog';
 
@@ -110,9 +111,12 @@ export default function CatalogPage() {
                  )}
                </div>
 
-               {/* ISBN Badge */}
-               <div className="shrink-0 text-right hidden sm:block">
+               {/* ISBN Badge + Edit */}
+               <div className="shrink-0 flex items-center gap-2">
                  <span className="text-xs text-slate-400">{book.isbn}</span>
+                 {book.isbn && (
+                   <Link href={`/books/${encodeURIComponent(book.isbn)}/edit`} className="rounded-md border border-indigo-300 px-2.5 py-1 text-xs font-medium text-indigo-600 hover:bg-indigo-50 whitespace-nowrap">Edit</Link>
+                 )}
                </div>
              </div>
            ))}
