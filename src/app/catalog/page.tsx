@@ -22,8 +22,11 @@ export default function CatalogPage() {
       
        if (searchQuery) {
         query = query.or(`title.ilike.%${searchQuery}%,isbn.eq.${searchQuery}`);
-         }
-       
+          }
+
+       // Exclude archived books
+        query = query.eq("is_archived", false).or("is_archived.is.null");
+        
        const { data } = await query;
        
       if (data) setBooks(data);

@@ -217,37 +217,37 @@ const AddBookDialogComponent = forwardRef<
       return;
     }
 
-    const cleaned = cleanIsbn(form.isbn);
-    const hasISBN = cleaned.length > 0;
+     const cleaned = cleanIsbn(form.isbn);
+     const hasISBN = cleaned.length > 0;
 
-    try {
-         // Build book record with isbn always present as string (empty when no ISBN).
-         // We do this because the DB books.isbn column still has NOT NULL until deploy_fix.sql is run.
-       const bookData: Record<string, unknown> = {
-          isbn: hasISBN ? cleaned : '',
-          title: form.title.trim(),
-          subtitle: form.subtitle?.trim() || null,
-          authors: form.authors.trim()
+     try {
+        // Build base record; only include isbn when we have one (omit otherwise to avoid NOT NULL violations)
+      const bookBase: Record<string, unknown> = {
+           title: form.title.trim(),
+           subtitle: form.subtitle?.trim() || null,
+           authors: form.authors.trim()
                ? [form.authors.split(',')[0]!.trim()]
-              : [],
-          publisher: form.publisher?.trim() || null,
-          publish_date: form.publishDate?.trim() || null,
-          pages: parseInt(form.pages, 10) || null,
-          cover_url: form.coverUrl?.trim() || null,
+                : [],
+           publisher: form.publisher?.trim() || null,
+           publish_date: form.publishDate?.trim() || null,
+           pages: parseInt(form.pages, 10) || null,
+           cover_url: form.coverUrl?.trim() || null,
           };
 
-            // ISBN present → upsert on unique isbn constraint; no ISBN → insert with empty string (keeps not-null satisfied)
-         let saveResult!: { error: unknown };
+        // isbn present or empty → upsert (isbn field exists always now, since deploy_fix runs); no ISBN will be '' which DB accepts
+       let saveResult!: { error: unknown };
+      const bookData = hasISBN ? { ...bookBase, isbn: cleaned } : { ...bookBase, isbn: null };
+
          if (hasISBN) {
-           saveResult = await supabase.from('books').upsert(bookData, { onConflict: 'isbn' });
+            saveResult = await supabase.from('books').upsert(bookData as Record<string, string | number[]>, { onConflict: 'isbn' });
              } else {
-            // No ISBN → insert with isbn as ''; keep it here until deploy_fix.sql is run to make isbn nullable in the DB
-           bookData.isbn = '';
-           saveResult = await supabase.from('books').insert(bookData);
+           // Null ISBN — omit isbn field entirely to avoid 23502 NOT NULL violation
+           delete (bookData as Record<string, unknown>).isbn;
+            saveResult = await supabase.from('books').insert(bookData);
              }
 
        if (saveResult?.error) {
-        console.error('Book insert/upsert failed:', saveResult.error);
+         console.error('Book insert/upsert failed:', saveResult.error);
         throw saveResult.error;
           }
 
