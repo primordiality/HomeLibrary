@@ -175,15 +175,15 @@ CREATE POLICY locations_manage_owned ON locations
     FOR ALL USING ((SELECT lib.owner_id FROM libraries lib 
                       WHERE lib.id = locations.library_id) = auth.uid());
 
-|-- books: all can view; owners manage   
+|-- books: all can view; owners manage    
 CREATE POLICY books_select_all ON books 
     FOR SELECT USING (auth.uid() IS NOT NULL);
 CREATE POLICY books_manage_owned ON books 
-    FOR ALL USING ((SELECT lib.owner_id FROM libraries lib JOIN book_copies bc 
+    FOR UPDATE OR DELETE USING ((SELECT lib.owner_id FROM libraries lib JOIN book_copies bc 
                       ON bc.library_id = lib.id WHERE bc.book_isbn = books.isbn) = auth.uid());
 -- allow full CRUD for authenticated users (needed for add-book upsert/insert)
-CREATE POLICY books_insert_all ON books FOR INSERT WITH CHECK (true);
-CREATE POLICY books_update_all ON books FOR UPDATE USING (true) WITH CHECK (true);
+CREATE POLICY books_insert_all ON books FOR INSERT WITH CHECK (auth.uid() IS NOT NULL);
+CREATE POLICY books_update_all ON books FOR UPDATE USING (true) WITH CHECK (auth.uid() IS NOT NULL);
 
 -- book_copies: all can view; owners/librarians manage   
 CREATE POLICY book_copies_select_all ON book_copies 
