@@ -57,14 +57,42 @@ export default function ManageBooksPage() {
        if (!lib) { router.replace('/libraries'); return; }
        setLibrary(lib);
 
-         // Book copies in this library (LEFT JOIN so NULL-isbn books aren't dropped)
+         // Book copies in this library (no join — fetch books separately)
          const { data: copies, error: cErr } = await supabase
              .from('book_copies')
-             .select('*, books:book_isbn!left(isbn, title, subtitle, authors)')
+             .select('*')
              .eq('library_id', libraryId);
 
          if (cErr) console.error('book_copies query failed:', cErr);
-         if (copies) setBooks(copies.map((c: any) => ({ ...c, _bi: c.books ?? {} })));
+
+         // Fetch book metadata for copies that have an ISBN
+         const copiesWithIsbn = (copies || []).filter((c: any) => c.book_isbn);
+         const copiesWithoutIsbn = (copies || []).filter((c: any) => !c.book_isbn);
+
+         let bookMap: Record<string, any> = {};
+         if (copiesWithIsbn.length > 0) {
+           const isbnList = copiesWithIsbn.map((c: any) => c.book_isbn);
+           const { data: booksData } = await supabase
+             .from('books')
+             .select('isbn, title, subtitle, authors')
+             .in('isbn', isbnList);
+           if (booksData) {
+             booksData.forEach((b: any) => { bookMap[b.isbn] = b; });
+           }
+         }
+
+         // Merge copy data with book metadata
+         const merged = copiesWithIsbn.map((c: any) => ({
+           ...c,
+           _bi: bookMap[c.book_isbn] || {},
+         }));
+         // Add NULL-isbn copies with empty metadata
+         const allBooks = [
+           ...merged,
+           ...copiesWithoutIsbn.map((c: any) => ({ ...c, _bi: {} })),
+         ];
+
+         setBooks(allBooks);
 
            // Other libraries (for move target dropdown)
        const { data: other } = await supabase
