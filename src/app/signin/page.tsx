@@ -37,7 +37,12 @@ export default function SignIn() {
     if (result && result.error) {
       setError(result.error);
     } else {
-      window.location.href = "/";
+      // For signup, redirect to pending page instead of dashboard
+      if (mode === "signup") {
+        window.location.href = "/register/pending";
+      } else {
+        window.location.href = "/";
+      }
     }
   };
 

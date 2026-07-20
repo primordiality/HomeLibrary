@@ -52,17 +52,16 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const signUp = async (email: string, password: string, name?: string) => {
     try {
       setLoading(true);
-      const { error } = await supabase.auth.signUp({
+      const { data, error } = await supabase.auth.signUp({
         email,
         password,
         options: { data: { display_name: name || '' } },
       });
-      if (error) return { error: 'Sign up failed. Check your connection.' };
-      return { error: null };
+      if (error) return { error: error.message, userCreated: false };
+      return { error: null, userCreated: !!data?.user };
     } catch (e) {
-      
-const err = e as Error;
-  return { error: err?.message || 'Sign-up failed. Please try again.' };
+      const err = e as Error;
+      return { error: err?.message || 'Sign-up failed. Please try again.', userCreated: false };
     } finally {
       setLoading(false);
     }
