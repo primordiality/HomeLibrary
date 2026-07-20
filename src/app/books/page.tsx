@@ -75,27 +75,27 @@ export default function BooksBrowsePage() {
          <p className="text-sm text-slate-500">Loading...</p>
        ) : filtered.length > 0 ? (
          <div className="space-y-3">
-           {filtered.map((book) => (
-             <Link key={book.isbn || `t-${book.title}`} href={`/books/${book.isbn || ''}`}
-               className="block no-underline">
-               <div className="flex items-center gap-4 rounded-xl border bg-white p-4 shadow-sm transition hover:shadow-md hover:border-indigo-200 cursor-pointer">
-                 {book.cover_url ? (
-                   <img src={book.cover_url} alt=""
-                     className="h-[80px] w-16 shrink-0 object-cover rounded-lg" />
-                 ) : (
-                   <span className="text-2xl text-slate-300">{'\u{1F4DA}'}</span>
-                 )}
-                 <div className="min-w-0 flex-1">
-                   <p className="font-medium text-sm text-slate-900 truncate">{book.title || 'Unknown'}</p>
-                   <p className="text-sm text-slate-500 mt-1">{book.authories?.join(', ') || book.author || 'Unknown author'}</p>
-                 </div>
-                 <div className="shrink-0 flex items-center gap-2">
-                   <span className="text-xs text-slate-400 font-mono hidden sm:inline">{book.isbn || 'No ISBN'}</span>
-                   <Link href={`/books/${book.isbn || ''}/edit`} className="rounded-md border border-indigo-300 px-2.5 py-1 text-xs font-medium text-indigo-600 hover:bg-indigo-50 whitespace-nowrap">Edit</Link>
-                 </div>
-                 </div>
-             </Link>
-           ))}
+         {filtered.map((book) => (
+           <Link key={book.isbn || `t-${book.title}`} href={`/books/${encodeURIComponent(book.isbn || '-' + book.id)}`}
+            className="block no-underline">
+             <div className="flex items-center gap-4 rounded-xl border bg-white p-4 shadow-sm transition hover:shadow-md hover:border-indigo-200 cursor-pointer">
+               {book.cover_url ? (
+                 <img src={book.cover_url} alt=""
+                  className="h-[80px] w-16 shrink-0 object-cover rounded-lg" />
+               ) : (
+                 <span className="text-2xl text-slate-300">{'\u{1F4DA}'}</span>
+               )}
+               <div className="min-w-0 flex-1">
+                 <p className="font-medium text-sm text-slate-900 truncate">{book.title || 'Unknown'}</p>
+                 <p className="text-sm text-slate-500 mt-1">{book.authories?.join(', ') || book.author || 'Unknown author'}</p>
+               </div>
+               <div className="shrink-0 flex items-center gap-2">
+                 <span className="text-xs text-slate-400 font-mono hidden sm:inline">{book.isbn || 'No ISBN'}</span>
+                 <Link href={`/books/${encodeURIComponent(book.isbn || '-' + book.id)}/edit`} className="rounded-md border border-indigo-300 px-2.5 py-1 text-xs font-medium text-indigo-600 hover:bg-indigo-50 whitespace-nowrap">Edit</Link>
+               </div>
+               </div>
+           </Link>
+         ))}
          </div>
        ) : (
          <div className="rounded-xl border border-dashed border-slate-300 p-12 text-center">

@@ -312,14 +312,16 @@ export default function ManageBooksPage() {
                            </div>
 
                            <div className="flex items-center gap-2 flex-shrink-0">
-                             {book.book_isbn && (
-                               <Link href={`/books/${book.book_isbn}/edit`} className="rounded-md border border-indigo-300 px-2.5 py-1 text-xs font-medium text-indigo-600 hover:bg-indigo-50 whitespace-nowrap">Edit</Link>
-                             )}
+                               {book.book_isbn ? (
+                                 <Link href={`/books/${encodeURIComponent(book.book_isbn)}/edit`} className="rounded-md border border-indigo-300 px-2.5 py-1 text-xs font-medium text-indigo-600 hover:bg-indigo-50 whitespace-nowrap">Edit</Link>
+                               ) : (
+                                 <Link href={`/books/-${book.id}/edit`} className="rounded-md border border-indigo-300 px-2.5 py-1 text-xs font-medium text-indigo-600 hover:bg-indigo-50 whitespace-nowrap">Edit</Link>
+                               )}
 
                              <button
-                               onClick={() => startEdit(book.id)}
-                               className="rounded-md border border-slate-300 px-2.5 py-1 text-xs font-medium text-slate-600 hover:bg-slate-50 whitespace-nowrap">
-                               Edit Copy</button>
+                              onClick={() => startEdit(book.id)}
+                              className="rounded-md border border-slate-300 px-2.5 py-1 text-xs font-medium text-slate-600 hover:bg-slate-50 whitespace-nowrap">
+                              Edit Copy</button>
 
                              <span className={`px-2 py-0.5 rounded-full text-xs ${book.condition === 'new' ? 'bg-green-100 text-green-800' : book.condition === 'good' ? 'bg-blue-100 text-blue-800' : book.condition === 'fair' ? 'bg-yellow-100 text-yellow-800' : 'bg-red-100 text-red-800'}`}>
                                {book.condition}</span>
@@ -377,8 +379,10 @@ export default function ManageBooksPage() {
                              </>)}
                        </div>
 
-                      {isEditing && (book.book_isbn && (
-                         <Link href={`/books/${book.book_isbn}/edit`} className="block text-center text-xs text-indigo-600 hover:text-indigo-800 py-1">Also edit book metadata</Link>
+                      {isEditing && (book.book_isbn ? (
+                         <Link href={`/books/${encodeURIComponent(book.book_isbn)}/edit`} className="block text-center text-xs text-indigo-600 hover:text-indigo-800 py-1">Also edit book metadata</Link>
+                       ) : (
+                         <Link href={`/books/-${book.id}/edit`} className="block text-center text-xs text-indigo-600 hover:text-indigo-800 py-1">Also edit book metadata</Link>
                        ))}
                       </div>
                       );
