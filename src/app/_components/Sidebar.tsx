@@ -23,11 +23,15 @@ export function Sidebar() {
                     setIsAdmin(false)
                     return
                 }
-                const { data } = await supabase
+                const { data, error } = await supabase
                     .from('profiles')
                     .select('role')
                     .eq('id', user.id)
                     .single()
+                if (error) {
+                    setIsAdmin(false)
+                    return
+                }
                 if (!cancelled) setIsAdmin(data?.role === 'system_admin')
             } catch {
                 if (!cancelled) setIsAdmin(false)
