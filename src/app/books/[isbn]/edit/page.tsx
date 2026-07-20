@@ -138,7 +138,8 @@ const t1x = copyData.title ?? ((copyData._bi as any)?.title as string) ?? 'Unkno
     try {
       if (isFallback) {
         // No-ISBN book: save to books table using lookupId (stable from URL, not state)
-        await supabase.from('books').update(sdata as Record<string, any>).eq('id', lookupId);
+        const result = await supabase.from('books').update(sdata as Record<string, any>).eq('id', lookupId);
+        if (result.error) throw new Error(result.error.message || 'Failed to save book');
         if (nIsbn) {
           // User assigned an ISBN — upsert as a new books row
           const sdataWithIsbn = { ...sdata, isbn: nIsbn };
