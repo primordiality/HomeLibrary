@@ -15,42 +15,42 @@ DROP TABLE IF EXISTS library_members CASCADE;
 DROP TABLE IF EXISTS libraries CASCADE;
 DROP TABLE IF EXISTS profiles CASCADE;
 
-|-- 2. PROFILES (extends auth.users with name + role)
-|CREATE TABLE IF NOT EXISTS profiles (
-|    id uuid PRIMARY KEY REFERENCES auth.users(id),
-|    name text DEFAULT '',
-|    email text,
-|    role text CHECK (role IN ('system_admin','library_owner','librarian','patron')),
-|    created_at timestamptz NOT NULL DEFAULT now()
-|);
+-- 2. PROFILES (extends auth.users with name + role)
+CREATE TABLE IF NOT EXISTS profiles (
+    id uuid PRIMARY KEY REFERENCES auth.users(id),
+    name text DEFAULT '',
+    email text,
+    role text CHECK (role IN ('system_admin','library_owner','librarian','patron')),
+    created_at timestamptz NOT NULL DEFAULT now()
+);
 
-|-- 2a. FIX: Backfill missing profiles for existing auth.users
-|-- Run this in Supabase SQL Editor once to resolve FK violations on libraries.owner_id
-|INSERT INTO profiles (id, name, email, role)
-|SELECT au.id, COALESCE(au.email, ''), au.email, 'library_owner'
-|FROM auth.users au
-|LEFT JOIN profiles p ON p.id = au.id
-|WHERE p.id IS NULL;
+-- 2a. FIX: Backfill missing profiles for existing auth.users
+-- Run this in Supabase SQL Editor once to resolve FK violations on libraries.owner_id
+INSERT INTO profiles (id, name, email, role)
+SELECT au.id, COALESCE(au.email, ''), au.email, 'library_owner'
+FROM auth.users au
+LEFT JOIN profiles p ON p.id = au.id
+WHERE p.id IS NULL;
 
-|-- 2b. Idempotent trigger for future signups (ON CONFLICT prevents duplicates)
-|CREATE OR REPLACE FUNCTION handle_new_user() RETURNS TRIGGER AS $$
-|BEGIN
-|  INSERT INTO profiles (id, name, email)
-|  VALUES (NEW.id, COALESCE(NEW.raw_user_meta_attr->>'display_name', ''), NEW.email)
-|  ON CONFLICT (id) DO UPDATE
-|    SET name = COALESCE(EXCLUDED.name, profiles.name),
-|        email = EXCLUDED.email;
-|  RETURN NEW;
-|END;
-|$$ LANGUAGE plpgsql SECURITY DEFINER;
+-- 2b. Idempotent trigger for future signups (ON CONFLICT prevents duplicates)
+CREATE OR REPLACE FUNCTION handle_new_user() RETURNS TRIGGER AS $$
+BEGIN
+  INSERT INTO profiles (id, name, email)
+  VALUES (NEW.id, COALESCE(NEW.raw_user_meta_attr->>'display_name', ''), NEW.email)
+  ON CONFLICT (id) DO UPDATE
+    SET name = COALESCE(EXCLUDED.name, profiles.name),
+        email = EXCLUDED.email;
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
 
-|-- ═══ AUTH TRIGGER: wire handle_new_user() to auth.users ║═
+-- ═══ AUTH TRIGGER: wire handle_new_user() to auth.users ║═
 DROP TRIGGER IF EXISTS handle_new_user_trigger ON auth.users CASCADE;
 CREATE TRIGGER handle_new_user_trigger
   AFTER INSERT ON auth.users
   FOR EACH ROW EXECUTE PROCEDURE handle_new_user();
 
-|-- 2. LIBRARIES 
+-- 3. LIBRARIES
 CREATE TABLE IF NOT EXISTS libraries (
     id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
     name text NOT NULL,
@@ -82,10 +82,11 @@ CREATE TABLE locations (
     created_at timestamptz NOT NULL DEFAULT now()
 );
 
-|-- 6. BOOKS (master record per ISBN)
+-- 6. BOOKS (master record per ol_key; isbn is optional)
 CREATE TABLE books (
     id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-    isbn text UNIQUE,   -- nullable for no-ISBN books; unique index handles upserts when ISBN exists
+    isbn text,
+    ol_key text UNIQUE,  -- OpenLibrary work key for de-duplication
     title text NOT NULL,
     subtitle text,
     authors text[] DEFAULT '{}',
@@ -100,11 +101,12 @@ CREATE TABLE books (
 );
 
 CREATE INDEX books_isbn_idx ON books USING btree (isbn) WHERE isbn IS NOT NULL;
+CREATE INDEX books_ol_key_idx ON books USING btree (ol_key) WHERE ol_key IS NOT NULL;
 
 -- 7. BOOK COPIES (physical items per library)
 CREATE TABLE book_copies (
     id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-    book_isbn text REFERENCES books(isbn),
+    book_id uuid REFERENCES books(id),
     library_id uuid REFERENCES libraries(id),
     location_id uuid REFERENCES locations(id),
     barcode text,
@@ -115,6 +117,8 @@ CREATE TABLE book_copies (
     created_at timestamptz NOT NULL DEFAULT now(),
     updated_at timestamptz NOT NULL DEFAULT now()
 );
+
+CREATE INDEX book_copies_book_library_idx ON book_copies USING btree (book_id, library_id);
 
 -- 8. BORROWS (checkout/return tracking)
 CREATE TABLE borrows (
@@ -132,7 +136,7 @@ CREATE TABLE borrows (
 CREATE TABLE holds (
     id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
     patron_user_id uuid REFERENCES profiles(id),
-    book_isbn text REFERENCES books(isbn),
+    book_id uuid REFERENCES books(id),
     library_id uuid REFERENCES libraries(id),
     status text CHECK (status IN ('waiting','accepted','cancelled')),
     created_at timestamptz NOT NULL DEFAULT now(),
@@ -178,22 +182,20 @@ CREATE POLICY locations_manage_owned ON locations
     FOR ALL USING ((SELECT lib.owner_id FROM libraries lib 
                       WHERE lib.id = locations.library_id) = auth.uid());
 
-|-- books: all can view; owners manage    
+-- books: all can view; owners manage via book_copies join on book_id
 CREATE POLICY books_select_all ON books 
     FOR SELECT USING (auth.uid() IS NOT NULL);
--- INSERT: any authenticated user can add new books (no ownership check needed)
 CREATE POLICY books_insert_all ON books 
     FOR INSERT WITH CHECK (auth.uid() IS NOT NULL);
--- UPDATE/DELETE: only owners of a copy in their library
 CREATE POLICY books_update_owned ON books 
     FOR UPDATE USING ((SELECT lib.owner_id FROM libraries lib JOIN book_copies bc 
-                      ON bc.library_id = lib.id WHERE bc.book_isbn = books.isbn) = auth.uid())
+                      ON bc.library_id = lib.id WHERE bc.book_id = books.id) = auth.uid())
     WITH CHECK (auth.uid() IS NOT NULL);
 CREATE POLICY books_delete_owned ON books 
     FOR DELETE USING ((SELECT lib.owner_id FROM libraries lib JOIN book_copies bc 
-                      ON bc.library_id = lib.id WHERE bc.book_isbn = books.isbn) = auth.uid());
+                      ON bc.library_id = lib.id WHERE bc.book_id = books.id) = auth.uid());
 
--- book_copies: all can view; owners/librarians manage   
+-- book_copies: all can view; owners/librarians manage
 CREATE POLICY book_copies_select_all ON book_copies 
 FOR SELECT USING (auth.uid() IS NOT NULL);
 CREATE POLICY book_copies_manage_owners_or_librarians ON book_copies
@@ -207,10 +209,9 @@ FOR ALL USING (
               AND lm.user_id = auth.uid()
               AND lm.role IN ('librarian','system_admin')
      ));
--- allow full CRUD for authenticated users (needed for add-book insert)
 CREATE POLICY book_copies_insert_all ON book_copies FOR INSERT WITH CHECK (true);
 
---borrows: patrons see own; librarians/owners manage
+-- borrows: patrons see own; librarians/owners manage
 CREATE POLICY borrows_select_all ON borrows
     FOR SELECT USING (auth.uid() IS NOT NULL);  
 CREATE POLICY borrows_manage_owners_or_librarians ON borrows
@@ -229,7 +230,7 @@ FOR ALL USING (
     )
 );
 
---holds: patrons manage own; owners/librarians manage all in library
+-- holds: patrons manage own; owners/librarians manage all in library
 CREATE POLICY holds_select_all ON holds 
     FOR SELECT USING (auth.uid() IS NOT NULL);
 CREATE POLICY holds_manage_owners_or_librarians ON holds FOR ALL
@@ -254,4 +255,3 @@ FOR EACH ROW EXECUTE PROCEDURE _set_updated_at_ts();
 
 CREATE TRIGGER tr_book_copies_ts BEFORE UPDATE ON book_copies 
 FOR EACH ROW EXECUTE PROCEDURE _set_updated_at_ts();
-
