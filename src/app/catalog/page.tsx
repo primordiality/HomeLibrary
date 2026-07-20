@@ -83,7 +83,7 @@ function CatalogContent() {
 
         // Also include standalone books from book_copies (no-ISBN, not yet cataloged)
         for (const copy of (copies || [])) {
-            if (!isbnSet.has(copy.book_isbn)) {
+            if (!isbnSet.has(copy.book_isbn ?? '')) {
                 entries.push({
                     id: 'copy-' + copy.id,
                     isbn: copy.book_isbn ?? '',
