@@ -58,22 +58,15 @@ export default function ManageBooksPage() {
        setLibrary(lib);
 
          // Book copies in this library
-         const { data: copies } = await supabase
+         const { data: copies, error: cErr } = await supabase
              .from('book_copies')
              .select('*, books (isbn, title, subtitle, authors)')
              .eq('library_id', libraryId);
 
+         if (cErr) console.error('book_copies query failed:', cErr);
          if (copies) setBooks(copies.map((c: any) => ({ ...c, _bi: c.books ?? {} })));
 
-         // Also fetch from `books` directly so we never show empty when copies is blocked by RLS
-         const { data: allBooks }: any = await supabase.from('books').select('*');
-         if (allBooks && (!copies || copies.length === 0)) {
-         setBooks(allBooks.map((bk: any) => ({
-            id: 'book-' + bk.id, _bi: bk, book_isbn: bk.isbn, library_id: null,
-         })));
-         }
-
-         // Other libraries (for move target dropdown)
+           // Other libraries (for move target dropdown)
        const { data: other } = await supabase
             .from('libraries')
             .select('id, name')
