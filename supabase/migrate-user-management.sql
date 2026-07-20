@@ -422,3 +422,25 @@ CREATE POLICY holds_manage_owners_or_librarians
             WHERE p.id = auth.uid() AND p.status IN ('active', 'pending')
         )
     );
+
+-- ════════════════════════════════════════════
+-- 6. Bootstrap: promote existing user to system_admin
+--    If a system_admin already exists → activate them
+--    If none exists → promote the oldest profile to system_admin + active
+--    This solves the chicken-and-egg: without an active admin, no one can
+--    flip pending users to active after this migration.
+-- ════════════════════════════════════════════
+
+-- Activate existing system_admins (if any)
+UPDATE profiles SET status = 'active'
+WHERE role = 'system_admin';
+
+-- Promote oldest profile to system_admin + active (only if none exists)
+UPDATE profiles SET status = 'active', role = 'system_admin'
+WHERE id = (
+    SELECT id FROM profiles
+    WHERE id NOT IN (SELECT id FROM profiles WHERE role = 'system_admin')
+    ORDER BY created_at ASC
+    LIMIT 1
+)
+AND NOT EXISTS (SELECT 1 FROM profiles WHERE role = 'system_admin');
