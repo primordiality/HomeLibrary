@@ -73,20 +73,37 @@ export default function EditBookPage() {
 
    async function loadAllFallback(copyId: string) {
      setLoading(true); setErrorStr(null);
-       // Load the book_copies row directly (no ISBN to look up in books table)
-     const query = supabase.from('book_copies').select('*').eq('id', copyId).single();
-     const { data: copyData, error }: any = await query;
-     if (error || !copyData) { 
-       setErrorStr(`Copy not found. ${error?.message ? 'Check connection and try again.' : 'Try editing through Manage Books instead.'}`); 
-       setLoading(false); 
-       return; 
-     }
-     setFallbackCopy(copyData);
-      // book_copies may store title/author inline or rely on a books row with matching isbn — fall back to copying data here
-     const copIsbn = copyData.book_isbn ?? '';
-     setIsbn(copIsbn);
-      loadAndSaveTitleFromCopy(copyData, copIsbn);
-   }
+
+       // Strategy 1: Try books table first (most reliable for no-ISBN records)
+      const bkRes: any = await supabase.from('books').select('*').eq('id', copyId).limit(1).single();
+      const { data: bookData, error: bkErr } = bkRes;
+      
+      if (bookData && !bkErr) {
+        // Found in books table — this is a no-ISBN book
+        setFallbackCopy(bookData);
+        setIsbn('');
+        loadAndSaveTitleFromCopy(bookData, '');
+        return;
+      }
+
+       // Strategy 2: Try book_copies (for ISBN-linked physical copies)
+      const copRes: any = await supabase.from('book_copies').select('*').eq('id', copyId).single();
+      const { data: copyData, error: copErr } = copRes;
+      
+       if (copyData && !copErr) {
+        // Found in book_copies — load normally
+        setFallbackCopy(copyData);
+         const copIsbn = copyData.book_isbn ?? '';
+        setIsbn(copIsbn);
+        loadAndSaveTitleFromCopy(copyData, copIsbn);
+        return;
+      }
+
+       // Neither source could find the record — show a clear message
+      const msg = bkErr?.message || copErr?.message || 'Record not found';
+      setErrorStr(`Edit failed: ${msg}. Try editing via Manage Books instead.`);
+     setLoading(false);
+    }
 
    async function loadAndSaveTitleFromCopy(copyData: any, _copIsbn: string) {
       // If the copy has no ISBN, try to pull metadata from the books table via another field.
