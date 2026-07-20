@@ -57,10 +57,10 @@ export default function ManageBooksPage() {
        if (!lib) { router.replace('/libraries'); return; }
        setLibrary(lib);
 
-         // Book copies in this library
+         // Book copies in this library (LEFT JOIN so NULL-isbn books aren't dropped)
          const { data: copies, error: cErr } = await supabase
              .from('book_copies')
-             .select('*, books (isbn, title, subtitle, authors)')
+             .select('*, books:book_isbn!left(isbn, title, subtitle, authors)')
              .eq('library_id', libraryId);
 
          if (cErr) console.error('book_copies query failed:', cErr);
