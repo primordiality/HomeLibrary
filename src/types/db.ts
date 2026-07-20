@@ -1,9 +1,11 @@
 // Auto-synced from the Supabase SQL migration in supabase/schema.sql
 // This is your single source of truth for database shapes
 export interface Profile {
-  id: string                    // auth.user id
-  name: string
-  email: string | null          // nullable, not always present
+  id: string                    // auth.user id (or uuid for manual patrons)
+  name?: string | null          // legacy name field
+  email?: string | null         // nullable, not always present
+  first_name?: string | null    // first name (manual patrons)
+  last_name?: string | null     // last name (manual patrons)
   role: 'system_admin' | 'library_owner' | 'librarian' | 'patron'
   created_at: string            // ISO datetime
 }
