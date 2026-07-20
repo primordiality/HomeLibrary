@@ -3,7 +3,9 @@
 import { useState, useEffect, useImperativeHandle, forwardRef, useLayoutEffect } from 'react';
 import { supabase } from '@/lib/supabase/client';
 import { fetchBookByIsbn, searchWorksByTitle, cleanIsbn } from '@/lib/openlibrary';
+import { useAuth } from '@/contexts/AuthContext';
 import type { RefObject } from 'react';
+import type { Profile } from '@/types/db';
 
 /* ═══════─ types ─────────────────────── */
 
@@ -38,12 +40,32 @@ type RefHandle = { resetForm: () => void };
 
 const AddBookDialogComponent = forwardRef<
   RefHandle,
-  { isOpen: boolean; onClose: () => void }
->(({ isOpen, onClose }, ref) => {
-  /* ── state ───────────────────────────── */
+  { isOpen: boolean; onClose: () => void; profile?: Profile | null }
+>(({ isOpen, onClose, profile }, ref) => {
+  const { profileLoading } = useAuth();
+  const { user } = useAuth();
+
+  /* ── Early gates ────────────────────── */
+  if (!user) return null;
+  if (!profile || profileLoading) return null; // wait for profile load
+  if (profile.role === 'patron') return null; // patrons never add books
+
+  /* ── Derived: which libraries does this user manage? ── */
+  const isOwner = profile.role === 'library_owner';
+  const isLibrarian = profile.role === 'librarian';
+  const isAdmin = profile.role === 'system_admin';
+  const isSelectable = isAdmin; // admin needs to pick, owner/librarian are locked
+
+  // User's managed libraries (owner → their own, librarian → via membership, admin → none)
+  const [managedLibraries, setManagedLibraries] = useState<any[]>([]);
+  const [managedLibraryId, setManagedLibraryId] = useState<string | null>(null); // for locked mode
+  const [selectedLibraryId, setSelectedLibraryId] = useState<string>(''); // for selectable mode
+  const [libraryError, setLibraryError] = useState<string | null>(null);
+
+  /* ── State ──────────────────────────── */
   const [mode, setMode] = useState<DialogMode>('isbn');
   const [step, setStep] = useState<DialogStep>('search');
-  const [error, setError] = useState<string | null>(null);
+  const [formError, setFormError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
   // search inputs
@@ -58,9 +80,8 @@ const AddBookDialogComponent = forwardRef<
     publisher: '', publishDate: '', pages: '', coverUrl: '',
   });
 
-  // libs
+  // available libraries for admin dropdown
   const [libraries, setLibraries] = useState<any[]>([]);
-  const [selectedLibraryId, setSelectedLibraryId] = useState('');
 
   /* ── ref for form reset (from parent) ── */
   useImperativeHandle(ref, () => ({
@@ -69,7 +90,8 @@ const AddBookDialogComponent = forwardRef<
       setManualTitle('');
       setManualAuthor('');
       setWorks([]);
-      setError(null);
+      setFormError(null);
+      setLibraryError(null);
       setLoading(false);
       setStep('search');
       setForm(formDefault());
@@ -81,24 +103,82 @@ const AddBookDialogComponent = forwardRef<
     publisher: '', publishDate: '', pages: '', coverUrl: '',
   });
 
-  /* ── effect: load libs ─────────────── */
+  /* ── Effect: resolve user's library on dialog open ── */
   useEffect(() => {
-    const loadLibraries = async () => {
+    if (!isOpen) return;
+
+    // Reset selection on open
+    setSelectedLibraryId('');
+    setManagedLibraryId(null);
+    setFormError(null);
+    setLibraryError(null);
+
+    // Role-based library resolution
+    async function resolveLibrary() {
       try {
-        const { data } = await supabase
-          .from('libraries')
-          .select('*')
-          .eq('is_archived', false)
-          .order('name');
-        setLibraries(data || []);
-        if ((data?.length ?? 0) > 0 && !selectedLibraryId) {
-          setSelectedLibraryId(data[0].id as string);
+        if (isOwner) {
+          // Owner: fetch their owned library
+          const { data } = await supabase
+            .from('libraries')
+            .select('id, name')
+            .eq('owner_id', user.id!)
+            .eq('is_archived', false)
+            .single();
+          if (data) {
+            setManagedLibraryId(data.id);
+            setManagedLibraries([data]);
+          } else {
+            setLibraryError('You are not the owner of any library. Contact an admin.');
+          }
+        } else if (isLibrarian) {
+          // Librarian: fetch from library_members
+          const { data: members } = await supabase
+            .from('library_members')
+            .select('library_id, role')
+            .eq('user_id', user.id!)
+            .eq('role', 'librarian');
+
+          if (!members || members.length === 0) {
+            setLibraryError('You are not assigned to any library. Contact an admin.');
+            return;
+          }
+
+          const libIds = members.map((m: any) => m.library_id);
+          const { data: libs } = await supabase
+            .from('libraries')
+            .select('id, name')
+            .in('id', libIds)
+            .eq('is_archived', false);
+
+          if (!libs || libs.length === 0) {
+            setLibraryError('No active libraries found for your assignments. Contact an admin.');
+            return;
+          }
+
+          if (libs.length === 1) {
+            // Single library → locked
+            setManagedLibraryId(libs[0].id);
+            setManagedLibraries(libs);
+          } else {
+            // Multiple libraries → dropdown selectable
+            setLibraries(libs);
+          }
+        } else if (isAdmin) {
+          // Admin: load all active libraries for dropdown
+          const { data } = await supabase
+            .from('libraries')
+            .select('id, name')
+            .eq('is_archived', false)
+            .order('name');
+          setLibraries(data || []);
         }
       } catch (err: unknown) {
-        console.error('Failed to load libraries:', err);
+        const msg = err instanceof Error ? err.message : 'Failed to load libraries';
+        setLibraryError(msg);
       }
-    };
-    if (isOpen) loadLibraries();
+    }
+
+    resolveLibrary();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isOpen]);
 
@@ -150,12 +230,12 @@ const AddBookDialogComponent = forwardRef<
   /* ═══════─ event handlers ───────────── */
 
   async function handleISBNSearch(): Promise<void> {
-    setError(null);
+    setFormError(null);
     setLoading(true);
     try {
       const cleaned = cleanIsbn(query);
       if (cleaned.length !== 10 && cleaned.length !== 13) {
-        setError('Enter a valid ISBN (10 or 13 digits).');
+        setFormError('Enter a valid ISBN (10 or 13 digits).');
         setLoading(false);
         return;
       }
@@ -165,7 +245,7 @@ const AddBookDialogComponent = forwardRef<
       console.error('OpenLibrary search failed:', msg);
       setForm(formDefault());
       setForm(prev => ({ ...prev, isbn: cleanIsbn(query) }));
-      setError(
+      setFormError(
         'Search failed — please fill in the details manually.'
       );
       setStep('review');
@@ -175,14 +255,14 @@ const AddBookDialogComponent = forwardRef<
   }
 
   async function handleManualSearch(): Promise<void> {
-    setError(null);
+    setFormError(null);
     setLoading(true);
     setWorks([]);
     try {
       const title = manualTitle.trim();
       const author = manualAuthor.trim();
       if (!title) {
-        setError('Enter a book title to search.');
+        setFormError('Enter a book title to search.');
         setLoading(false);
         return;
       }
@@ -195,7 +275,7 @@ const AddBookDialogComponent = forwardRef<
       // Still allow continuing with just the fields they entered manually
       setForm(formDefault());
       setForm(prev => ({ ...prev, title: manualTitle, authors: manualAuthor }));
-      setError(
+      setFormError(
         'Search unavailable — please enter details and save directly.'
       );
     } finally {
@@ -208,12 +288,24 @@ const AddBookDialogComponent = forwardRef<
   }
 
   async function handleSubmit(): Promise<void> {
-    setError(null);
+    setFormError(null);
     setLoading(true);
 
     // Title is required at minimum
     if (!form.title?.trim()) {
-      setError('A book title is required.');
+      setFormError('A book title is required.');
+      setStep('review');
+      setLoading(false);
+      return;
+    }
+
+    // Library must be selected (admin) or resolved (owner/librarian)
+    const libraryId = isSelectable
+      ? selectedLibraryId
+      : (managedLibraryId || '');
+
+    if (!libraryId) {
+      setFormError('Please select a library for this book, or contact an admin to assign you a library.');
       setStep('review');
       setLoading(false);
       return;
@@ -274,18 +366,17 @@ const AddBookDialogComponent = forwardRef<
       }
 
       // Insert book_copies row (with book_id instead of book_isbn)
-      if (selectedLibraryId) {
-        await supabase.from('book_copies').insert({
-          book_id: bookId,
-          library_id: selectedLibraryId,
-          location_id: null,
-          barcode: null,
-          condition: 'new' as const,
-          purchase_price: null,
-          acquired_date: new Date().toISOString().split('T')[0],
-          notes: null,
-        });
-      }
+      // Always insert — we validated libraryId above, no silent skips
+      await supabase.from('book_copies').insert({
+        book_id: bookId,
+        library_id: libraryId,
+        location_id: null,
+        barcode: null,
+        condition: 'new' as const,
+        purchase_price: null,
+        acquired_date: new Date().toISOString().split('T')[0],
+        notes: null,
+      });
 
       setStep('saved');
     } catch (err: unknown) {
@@ -303,7 +394,7 @@ const AddBookDialogComponent = forwardRef<
                  (err as Record<string, unknown>).error_description) {
         detail = (err as Record<string, unknown>).error_description as string;
       }
-      setError(detail);
+      setFormError(detail);
       setStep('review');
     } finally {
       setLoading(false);
@@ -315,7 +406,7 @@ const AddBookDialogComponent = forwardRef<
     setManualTitle('');
     setManualAuthor('');
     setWorks([]);
-    setError(null);
+    setFormError(null);
     setLoading(false);
     if (m === 'isbn') setStep('search');
     else                setStep('search'); // same step, different inputs
@@ -326,7 +417,7 @@ const AddBookDialogComponent = forwardRef<
     setManualTitle('');
     setManualAuthor('');
     setWorks([]);
-    setError(null);
+    setFormError(null);
     setLoading(false);
     setStep('search');
     setForm(formDefault());
@@ -514,16 +605,18 @@ const AddBookDialogComponent = forwardRef<
   /* ── review/save step ─────────────── */
 
   function renderReviewStep(): React.ReactElement {
+    const isSelectable = !isOwner && !isLibrarian;
+
     return (
       <div className="space-y-4">
         {/* Library selector */}
-        {libraries.length > 0 && (
+        {isSelectable && libraries.length > 0 ? (
           <div>
             <label
               htmlFor="lib-select"
               className="block text-sm font-medium text-slate-700 mb-1"
             >
-              Copy to Library
+              Copy to Library <span className="text-red-500">*</span>
             </label>
             <select
               id="lib-select"
@@ -531,13 +624,33 @@ const AddBookDialogComponent = forwardRef<
               onChange={(e) => setSelectedLibraryId(e.target.value)}
               className="w-full rounded-lg border border-slate-300 px-3 py-1.5 text-sm focus:border-indigo-500 focus:ring-indigo-500"
             >
-              <option value="">Select...</option>
+              <option value="">Select a library...</option>
               {libraries.map((lib) => (
                 <option key={lib.id} value={lib.id}>
                   {lib.name}
                 </option>
               ))}
             </select>
+            {!selectedLibraryId && (
+              <p className="text-xs text-amber-600 mt-1">Please select a library before adding.</p>
+            )}
+          </div>
+        ) : (isOwner || isLibrarian) && managedLibraryId ? (
+          <div>
+            <label className="block text-sm font-medium text-slate-700 mb-1">
+              Copy to Library (your library)
+            </label>
+            <input
+              value={managedLibraries[0]?.name || 'Loading...'}
+              disabled
+              className="w-full rounded-lg border border-slate-300 px-3 py-1.5 text-sm bg-slate-100 opacity-60 cursor-not-allowed"
+            />
+          </div>
+        ) : null}
+
+        {libraryError && (
+          <div className="p-3 bg-red-50 text-sm text-red-700 rounded-lg">
+            {libraryError}
           </div>
         )}
 
@@ -556,9 +669,9 @@ const AddBookDialogComponent = forwardRef<
         </div>
 
         {/* Error message */}
-        {error && (
+        {formError && (
           <div className="p-3 bg-yellow-50 text-sm text-yellow-700 rounded-lg">
-            {error}
+            {formError}
           </div>
         )}
 
@@ -618,9 +731,9 @@ const AddBookDialogComponent = forwardRef<
               {renderSearchStep()}
 
               {/* Error in search step */}
-              {error && (
+              {formError && (
                 <div className="p-3 bg-red-50 text-sm text-red-700 rounded-lg">
-                  {error}
+                  {formError}
                 </div>
               )}
             </>
@@ -637,7 +750,7 @@ const AddBookDialogComponent = forwardRef<
           {step === 'error' && (
             <div className="p-4 bg-red-50 text-sm text-red-700 rounded-lg text-center">
               <span className="text-xl block mb-2">⚠️</span>
-              {error || 'Failed to add book. Please try again.'}
+              {formError || 'Failed to add book. Please try again.'}
               <br />
               <button
                 onClick={() => setStep('search')}

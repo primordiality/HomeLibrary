@@ -3,10 +3,13 @@
 import { createContext, useContext, useEffect, useState } from "react";
 import { supabase } from "@/lib/supabase/client";
 import type { User } from "@supabase/supabase-js";
+import type { Profile } from "@/types/db";
 
 type AuthContextType = {
   user: User | null;
+  profile: Profile | null;
   loading: boolean;
+  profileLoading: boolean;
   signIn: (email: string, password: string) => Promise<{ error: string | null }>;
   signUp: (email: string, password: string, name?: string) => Promise<{ error: string | null }>;
   signOut: () => Promise<void>;
@@ -16,25 +19,58 @@ const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
+  const [profile, setProfile] = useState<Profile | null>(null);
   const [loading, setLoading] = useState(true);
+  const [profileLoading, setProfileLoading] = useState(false);
 
   useEffect(() => {
     // Check existing session immediately
     supabase.auth.getUser().then(({ data: { user } }) => {
-      if (user) setUser(user);
-      setLoading(false);
+      if (user) {
+        setUser(user);
+        // Fetch profile for the authenticated user
+        loadProfile(user.id);
+      } else {
+        setLoading(false);
+      }
     }).catch(() => setLoading(false));
 
     const { data: listener } = supabase.auth.onAuthStateChange((_event, session) => {
       if (session?.user) {
         setUser(session.user);
+        loadProfile(session.user.id);
       } else {
         setUser(null);
+        setProfile(null);
+        setLoading(false);
       }
     });
 
     return () => listener.subscription.unsubscribe();
-  }, [supabase]);
+  }, []);
+
+  async function loadProfile(userId: string) {
+    setProfileLoading(true);
+    try {
+      const { data, error } = await supabase
+        .from('profiles')
+        .select('*')
+        .eq('id', userId)
+        .single();
+      if (error) {
+        console.error('Failed to load profile:', error.message);
+        setProfile(null);
+      } else {
+        setProfile(data as Profile);
+      }
+    } catch (e) {
+      console.error('Profile fetch failed:', e);
+      setProfile(null);
+    } finally {
+      setProfileLoading(false);
+      setLoading(false);
+    }
+  }
 
   const signIn = async (email: string, password: string) => {
     try {
@@ -75,7 +111,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   };
 
   return (
-    <AuthContext.Provider value={{ user, loading, signIn, signUp, signOut }}>
+    <AuthContext.Provider value={{ user, profile, loading, profileLoading, signIn, signUp, signOut }}>
       {children}
     </AuthContext.Provider>
   );
