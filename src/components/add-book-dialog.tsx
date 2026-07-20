@@ -91,7 +91,7 @@ const AddBookDialogComponent = forwardRef<
           .eq('is_archived', false)
           .order('name');
         setLibraries(data || []);
-        if ((data?.length ?? 0) === 1 && !selectedLibraryId) {
+        if ((data?.length ?? 0) > 0 && !selectedLibraryId) {
           setSelectedLibraryId(data[0].id as string);
         }
       } catch (err: unknown) {
