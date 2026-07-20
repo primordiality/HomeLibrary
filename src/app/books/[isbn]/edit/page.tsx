@@ -136,11 +136,11 @@ const t1x = copyData.title ?? ((copyData._bi as any)?.title as string) ?? 'Unkno
     sdata.isbn = nIsbn || null;
     setSaving(true); setErrorStr(null); setOkMsg(null);
     try {
-      if (isFallback && fallbackCopy) {
-        // No-ISBN book: save to books table (no book_copies row exists)
+      if (isFallback) {
+        // No-ISBN book: save to books table using lookupId (stable from URL, not state)
         await supabase.from('books').update(sdata as Record<string, any>).eq('id', lookupId);
-        if (nIsbn && raw !== nIsbn) {
-          // User assigned an ISBN — also upsert into books table
+        if (nIsbn) {
+          // User assigned an ISBN — upsert as a new books row
           const sdataWithIsbn = { ...sdata, isbn: nIsbn };
           await supabase.from('books').upsert(sdataWithIsbn, { onConflict: 'isbn' });
         }
