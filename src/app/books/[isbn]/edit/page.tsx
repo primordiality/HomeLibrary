@@ -12,9 +12,10 @@ export default function EditBookPage() {
   const router = useRouter();
   const raw = params?.isbn ?? '';
 
-  // Detect surrogate fallback ID (prefixed with '-') for no-ISBN books stored in book_copies
+  // Detect surrogate fallback ID (prefixed with '-' for no-ISBN books)
   const isFallback = raw.startsWith('-');
-  const lookupId = isFallback ? raw.slice(1) : raw;
+  // Strip prefix: '-book-' (from manage-books, 6 chars) or '-' (from catalog, 1 char)
+  const lookupId = isFallback ? (raw.startsWith('-book-') ? raw.slice(6) : raw.slice(1)) : raw;
 
   const [isbn, setIsbn] = useState(raw);
   const [title, setTitle] = useState('');
@@ -136,11 +137,12 @@ const t1x = copyData.title ?? ((copyData._bi as any)?.title as string) ?? 'Unkno
     setSaving(true); setErrorStr(null); setOkMsg(null);
     try {
       if (isFallback && fallbackCopy) {
-        // No-ISBN book: update the book_copies row directly. If user assigns ISBN, also create books row.
-        await supabase.from('book_copies').update(sdata as Record<string, any>).eq('id', lookupId);
+        // No-ISBN book: save to books table (no book_copies row exists)
+        await supabase.from('books').update(sdata as Record<string, any>).eq('id', lookupId);
         if (nIsbn && raw !== nIsbn) {
-          sdata.isbn = null; // prevent double-write
-          await supabase.from('books').upsert(sdata as Record<string, any>, { onConflict: 'isbn' });
+          // User assigned an ISBN — also upsert into books table
+          const sdataWithIsbn = { ...sdata, isbn: nIsbn };
+          await supabase.from('books').upsert(sdataWithIsbn, { onConflict: 'isbn' });
         }
       } else {
         if (nIsbn && raw !== nIsbn) {
