@@ -7,6 +7,7 @@ export interface Profile {
   first_name?: string | null    // first name (manual patrons)
   last_name?: string | null     // last name (manual patrons)
   role: 'system_admin' | 'library_owner' | 'librarian' | 'patron'
+  status?: 'pending' | 'active' | 'suspended'  // account status for approval flow
   created_at: string            // ISO datetime
 }
 

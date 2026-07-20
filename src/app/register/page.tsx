@@ -20,14 +20,21 @@ export default function Register() {
   useEffect(() => {
     (async () => {
       try {
-        const { data, error } = await supabase
-          .from("library_settings")
-          .select("library_id, allow_public_registration")
-          .eq("allow_public_registration", true)
-          .limit(1);
+        // Use no-store cache header via fetch to avoid stale registration state
+        const res = await fetch(
+          `${process.env.NEXT_PUBLIC_SUPABASE_URL!}/rest/v1/library_settings?allow_public_registration=eq.true&select=library_id&limit=1`,
+          {
+            headers: {
+             apikey: process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+              Authorization: `Bearer ${process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!}`,
+              "Cache-Control": "no-store",
+            },
+          }
+        );
 
-        if (!error && data && data.length > 0) {
-          setRegistrationEnabled(true);
+        if (res.ok) {
+          const data = await res.json();
+          setRegistrationEnabled(data.length > 0);
         } else {
           setRegistrationEnabled(false);
         }

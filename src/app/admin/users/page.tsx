@@ -5,7 +5,7 @@ import { supabase } from "@/lib/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import type { Profile } from "@/types/db";
 
-type UserRow = Profile & { status?: string | null };
+type UserRow = Profile;
 
 export default function AdminUsers() {
   const [users, setUsers] = useState<UserRow[]>([]);
@@ -22,7 +22,7 @@ export default function AdminUsers() {
   const [creating, setCreating] = useState(false);
   const { user } = useAuth();
   const selfId = user?.id;
-  const adminCount = users.filter(u => u.role === "system_admin").length;
+  const adminCount = users.filter(u => u.role === "system_admin" && u.status === "active").length;
 
   const loadUsers = useCallback(async () => {
     try {
