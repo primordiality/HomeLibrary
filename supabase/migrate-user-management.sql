@@ -80,6 +80,40 @@ CREATE TABLE IF NOT EXISTS library_settings (
     created_at timestamptz NOT NULL DEFAULT now()
 );
 
+-- ═══ RLS: library_settings ║═
+ALTER TABLE library_settings ENABLE ROW LEVEL SECURITY;
+
+-- system_admin can read/write all settings
+CREATE POLICY library_settings_admin_all
+    ON library_settings
+    FOR ALL
+    USING (
+        EXISTS (
+            SELECT 1 FROM profiles p
+            WHERE p.id = auth.uid() AND p.role = 'system_admin'
+        )
+    );
+
+-- active/pending users can read their library's settings
+CREATE POLICY library_settings_read
+    ON library_settings
+    FOR SELECT
+    USING (
+        EXISTS (
+            SELECT 1 FROM profiles p
+            WHERE p.id = auth.uid() AND p.status IN ('active', 'pending')
+        )
+        AND library_id IN (
+            SELECT id FROM libraries
+            WHERE owner_id = auth.uid()
+               OR id IN (
+                   SELECT library_id FROM library_members
+                   WHERE user_id = auth.uid()
+                     AND role IN ('librarian', 'system_admin')
+               )
+        )
+    );
+
 -- ════════════════════════════════════════════
 -- 5. RLS POLICIES — update ALL tables
 --    New rules:
