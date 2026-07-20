@@ -1,13 +1,14 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { useRouter, usePathname } from "next/navigation";
+import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 
 /**
  * AdminGuard – wraps any admin route.
  * Fetches the caller's profile; if role != 'system_admin', redirect to /.
+ * Does NOT require the 'status' column (adds deference to pre-migration state).
  */
 export default function AdminGuard({ children }: { children: React.ReactNode }) {
   const router = useRouter();
@@ -23,18 +24,14 @@ export default function AdminGuard({ children }: { children: React.ReactNode }) 
 
     (async () => {
       try {
+        // Only check role — status column may not exist yet (migration pending)
         const { data: profile, error } = await supabase
           .from("profiles")
-          .select("role, status")
+          .select("role")
           .eq("id", user.id)
           .single();
 
         if (error || !profile || profile.role !== "system_admin") {
-          router.push("/");
-          return;
-        }
-
-        if (profile.status === "suspended") {
           router.push("/");
           return;
         }
