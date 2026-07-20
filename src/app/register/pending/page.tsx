@@ -8,6 +8,10 @@ export default function PendingApproval() {
   return (
     <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-slate-50 to-slate-100">
       <div className="w-full max-w-md p-8 space-y-6 bg-white rounded-xl shadow-lg text-center">
+        <div className="text-center">
+          <h1 className="text-2xl font-bold tracking-tight text-slate-900">Librarium</h1>
+        </div>
+
         <div className="mx-auto w-16 h-16 rounded-full bg-amber-100 flex items-center justify-center">
           <svg className="w-8 h-8 text-amber-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
@@ -15,7 +19,7 @@ export default function PendingApproval() {
         </div>
 
         <div className="space-y-2">
-          <h1 className="text-2xl font-bold text-slate-900">Account Pending Approval</h1>
+          <h2 className="text-lg font-semibold text-slate-900">Account Pending Approval</h2>
           <p className="text-sm text-slate-500">
             Thank you for signing up! Your account has been created and is awaiting
             review by an administrator. You&rsquo;ll be notified once your account is approved.

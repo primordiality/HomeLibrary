@@ -42,11 +42,8 @@ export default function Register() {
   return (
     <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-slate-50 to-slate-100">
       <div className="w-full max-w-md p-8 space-y-6 bg-white rounded-xl shadow-lg">
-        <div className="text-center space-y-2">
-          <h1 className="text-2xl font-bold text-slate-900">Create Account</h1>
-          <p className="text-sm text-slate-500">
-            Sign up to join HomeLibrary. Your account requires admin approval.
-          </p>
+        <div className="text-center">
+          <h1 className="text-2xl font-bold tracking-tight text-slate-900">Librarium</h1>
         </div>
 
         {error && (
@@ -54,6 +51,10 @@ export default function Register() {
             {error}
           </div>
         )}
+
+        <h2 className="text-center text-lg font-semibold text-slate-900">
+          Create Account
+        </h2>
 
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>
