@@ -12,7 +12,7 @@ interface MenuItem {
 
 export function Sidebar() {
     const pathname = usePathname()
-    const { user, signOut } = useAuth()
+    const { user, loading: authLoading, signOut } = useAuth()
     const [isAdmin, setIsAdmin] = useState(false)
 
     useEffect(() => {
@@ -62,30 +62,45 @@ export function Sidebar() {
              </div>
 
              <nav className="space-y-1">
-                 {menuItems.map(({ href, label }) => (
-                     <Link
-                        key={href}
-                        href={href}
-                        className={`block rounded-lg px-3 py-2 text-sm font-medium ${
-                            pathname === href
-                                 ? 'bg-gray-200 text-slate-900'
-                                 : 'text-slate-600 hover:bg-gray-100 hover:text-slate-900'
-                        }`}
-                     >
-                         {label}
-                     </Link>
-                 ))}
+                 {authLoading ? (
+                     <div className="text-sm text-slate-400">Loading…</div>
+                 ) : (
+                     menuItems.map(({ href, label }) => (
+                        <Link
+                           key={href}
+                           href={href}
+                           className={`block rounded-lg px-3 py-2 text-sm font-medium ${
+                               pathname === href
+                                    ? 'bg-gray-200 text-slate-900'
+                                    : 'text-slate-600 hover:bg-gray-100 hover:text-slate-900'
+                           }`}
+                        >
+                            {label}
+                        </Link>
+                     ))
+                 )}
              </nav>
 
              <div className="mt-auto pt-4 border-t">
-                 <p className="text-sm text-gray-500 truncate">
-                     Signed in as{' '}
-                     <span className={user ? 'font-medium text-slate-900' : 'text-red-500'}>
-                         {user?.email || 'Not logged in'}
-                     </span>
-                 </p>
-                 {signOut && (
-                     <button onClick={() => signOut()}>Sign Out</button>
+                 {authLoading ? (
+                     <div className="text-sm text-slate-400">Loading…</div>
+                 ) : (
+                     <>
+                         <p className="text-sm text-gray-500 truncate">
+                             {user ? 'Signed in as' : 'Not logged in'}
+                             {user && (
+                                 <>
+                                     {' '}
+                                     <span className="font-medium text-slate-900">
+                                         {user.email}
+                                     </span>
+                                 </>
+                             )}
+                         </p>
+                         {user && (
+                             <button onClick={() => signOut()}>Sign Out</button>
+                         )}
+                     </>
                  )}
              </div>
          </aside>
