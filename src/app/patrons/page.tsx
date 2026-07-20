@@ -8,7 +8,8 @@ export default function PatronsPage() {
   const [patrons, setPatrons] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
-  const [name, setName] = useState('');
+  const [firstName, setFirstName] = useState('');
+  const [lastName, setLastName] = useState('');
   const [email, setEmail] = useState('');
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [okMessage, setOkMessage] = useState<string | null>(null);
@@ -36,7 +37,7 @@ export default function PatronsPage() {
         .from('profiles')
         .select('*')
         .eq('role', 'patron')
-        .order('name');
+        .order('first_name');
       if (error) throw new Error(error.message);
       if (data) setPatrons(data);
     } catch (err: any) {
@@ -66,7 +67,6 @@ export default function PatronsPage() {
   async function loadPatronStats(patronIds: string[]) {
     if (patronIds.length === 0) return;
     try {
-      // Active borrows per patron
       const { data: borrows }: any = await supabase
         .from('borrows')
         .select('patron_user_id')
@@ -95,21 +95,29 @@ export default function PatronsPage() {
     setErrorMessage(null);
     setOkMessage(null);
 
-    if (!name.trim()) {
-      setErrorMessage('Patron name is required.');
+    const firstNameTrimmed = firstName.trim();
+    const lastNameTrimmed = lastName.trim();
+    if (!firstNameTrimmed && !lastNameTrimmed) {
+      setErrorMessage('First name or last name is required.');
       return;
     }
 
     try {
       const { data, error } = await supabase
         .from('profiles')
-        .insert([{ name: name.trim(), email: email.trim() || null, role: 'patron' }])
+        .insert([{
+          first_name: firstNameTrimmed || null,
+          last_name: lastNameTrimmed || null,
+          email: email.trim() || null,
+          role: 'patron',
+        }])
         .select();
 
       if (error) throw new Error(error.message);
       if (!data || data.length === 0) throw new Error('Failed to create patron — no data returned.');
 
-      setName('');
+      setFirstName('');
+      setLastName('');
       setEmail('');
       setShowForm(false);
       await loadPatrons();
@@ -141,12 +149,17 @@ export default function PatronsPage() {
     }
   }
 
+  // Display name helper
+  function displayName(p: any): string {
+    return [p.first_name, p.last_name].filter(Boolean).join(' ') || p.name || p.email || 'Unnamed';
+  }
+
   // Filter patrons by search
   const filteredPatrons = patrons.filter(p => {
     if (!searchQuery.trim()) return true;
     const q = searchQuery.toLowerCase();
-    return (p.name || '').toLowerCase().includes(q) ||
-           (p.email || '').toLowerCase().includes(q);
+    const name = displayName(p).toLowerCase();
+    return name.includes(q) || (p.email || '').toLowerCase().includes(q);
   });
 
   return (
@@ -220,20 +233,19 @@ export default function PatronsPage() {
           <h2 className="text-lg font-semibold text-slate-900 mb-4">New Patron</h2>
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
             <div>
-              <label className="block text-sm font-medium text-slate-700">Name *</label>
+              <label className="block text-sm font-medium text-slate-700">First Name *</label>
               <input
-                value={name}
-                onChange={e => setName(e.target.value)}
+                value={firstName}
+                onChange={e => setFirstName(e.target.value)}
                 className="mt-1 block w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
                 autoFocus
               />
             </div>
             <div>
-              <label className="block text-sm font-medium text-slate-700">Email</label>
+              <label className="block text-sm font-medium text-slate-700">Last Name</label>
               <input
-                type="email"
-                value={email}
-                onChange={e => setEmail(e.target.value)}
+                value={lastName}
+                onChange={e => setLastName(e.target.value)}
                 className="mt-1 block w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
               />
             </div>
@@ -269,7 +281,7 @@ export default function PatronsPage() {
                 const stats = patronStats[patron.id] || { borrows: 0, holds: 0 };
                 return (
                   <tr key={patron.id} className="hover:bg-slate-50">
-                    <td className="py-3 pl-4 font-medium text-slate-900">{patron.name || patron.email || 'Unnamed'}</td>
+                    <td className="py-3 pl-4 font-medium text-slate-900">{displayName(patron)}</td>
                     <td className="py-3 hidden sm:table-cell text-slate-500">{patron.email || '—'}</td>
                     <td className="py-3 hidden md:table-cell text-center">
                       {stats.borrows > 0 ? (
@@ -293,7 +305,7 @@ export default function PatronsPage() {
                         View All
                       </Link>
                       <button
-                        onClick={() => handleDelete(patron.id, patron.name || 'this patron')}
+                        onClick={() => handleDelete(patron.id, displayName(patron))}
                         className="text-red-600 hover:text-red-800 text-sm font-medium"
                       >
                         Delete
