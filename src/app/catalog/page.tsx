@@ -51,28 +51,49 @@ function CatalogContent() {
             ? (copies || []).filter(c => c.library_id === libId)
             : (copies || []);
 
-        // Build entries from copies (each unique ISBN gets one entry)
+        // Build entries from copies (each unique book_id gets one entry)
         const entries = [];
-        const seenIsbns = new Set();
+        const seenBookIds = new Set();
+        const bookIds = [];
 
         for (const copy of copiesToConsider) {
-            const isbn = copy.book_isbn ?? '';
+            const bookId = copy.book_id;
             
-            if (!seenIsbns.has(isbn)) {
-                seenIsbns.add(isbn);
-                
-                // Find the corresponding book in the books table for metadata
-                const book = allBooks?.find(b => (b.isbn ?? '') === isbn);
-                
-                entries.push({
-                    id: book ? book.id : 'copy-' + copy.id,
-                    isbn,
-                    title: book?.title ?? null,
-                    authors: book?.authors ?? [],
-                    cover_url: book?.cover_url ?? null,
-                    library_id: copy.library_id,
-                });
+            if (bookId && !seenBookIds.has(bookId)) {
+                seenBookIds.add(bookId);
+                bookIds.push(bookId);
             }
+        }
+
+        // Batch-query books by unique ids
+        let bookMap = {};
+        if (bookIds.length > 0) {
+            const { data: booksData, error: bmErr } = await supabase
+                .from('books')
+                .select('id, title, subtitle, authors, cover_url')
+                .in('id', bookIds);
+            if (bmErr) console.error('batch books query failed:', bmErr);
+            if (booksData) {
+                booksData.forEach(b => { bookMap[b.id] = b; });
+            }
+        }
+
+        for (const copy of copiesToConsider) {
+            const bookId = copy.book_id;
+            if (!bookId) continue;
+            
+            const book = bookMap[bookId];
+            
+            entries.push({
+                id: book ? book.id : 'copy-' + copy.id,
+                book_id: bookId,
+                title: book?.title ?? null,
+                subtitle: book?.subtitle ?? null,
+                authors: book?.authors ?? [],
+                cover_url: book?.cover_url ?? null,
+                isbn: copy.book_isbn ?? null,
+                library_id: copy.library_id,
+            });
         }
 
         // Apply search filter
@@ -81,6 +102,8 @@ function CatalogContent() {
             const q = query.toLowerCase();
             filtered = filtered.filter(
                 e => (e.title || '').toLowerCase().includes(q) ||
+                     (e.subtitle || '').toLowerCase().includes(q) ||
+                     (e.authors || []).some(a => a.toLowerCase().includes(q)) ||
                      (e.isbn || '').includes(query)
             );
         }
@@ -195,7 +218,7 @@ function CatalogContent() {
         ) : books.length > 0 ? (
           <ul className="space-y-3">
             {books.map(book => (
-              <li key={book.id + book.isbn}
+              <li key={book.id + book.title}
                   className="flex items-center gap-4 rounded-xl border bg-white p-4 shadow-sm transition hover:shadow-md">
                 {/* Cover */}
                 {book.cover_url ? (
@@ -231,7 +254,7 @@ function CatalogContent() {
                 {/* ISBN + Edit */}
                 <div className="shrink-0 flex items-center gap-2">
                   <span className="text-xs text-slate-400">{book.isbn}</span>
-                  <Link href={`/books/${encodeURIComponent(book.isbn || '-' + book.id)}/edit`}
+                  <Link href={`/books/${book.id}/edit`}
                        className="rounded-md border border-indigo-300 px-2.5 py-1 text-xs font-medium text-indigo-600 hover:bg-indigo-50 whitespace-nowrap">Edit</Link>
                 </div>
               </li>
