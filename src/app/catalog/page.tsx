@@ -32,17 +32,11 @@ function CatalogContent() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeLibId, searchQuery]);
 
-  async function findIsbnLibrary(isbn, copies) {
-      for (let i = 0; i < copies.length; i++) {
-          if (copies[i].book_isbn === isbn) return copies[i].library_id;
-      }
-      return null;
-  }
+
 
   async function loadCatalog(libId, query) {
     setLoading(true);
     try {
-        // Fetch ALL books and book_copies - no library filter at query level
         const [{ data: copies, error: cErr },
                { data: allBooks, error: bErr }] = await Promise.all([
             supabase.from('book_copies').select('*'),
@@ -52,48 +46,37 @@ function CatalogContent() {
         if (cErr) console.error('copies query failed:', cErr);
         if (bErr) console.error('books query failed:', bErr);
 
-        // Build entries from book table (primary source -- always works)
-        const isbnSet = new Set();
+        // Filter copies by library (if a library is selected)
+        const copiesToConsider = libId
+            ? (copies || []).filter(c => c.library_id === libId)
+            : (copies || []);
+
+        // Build entries from copies (each unique ISBN gets one entry)
         const entries = [];
+        const seenIsbns = new Set();
 
-        for (const bk of (allBooks || [])) {
-            const isbn = bk.isbn || '';
-            isbnSet.add(isbn);
-            let libIdForIsbn = null;
-            if (copies && copies.length > 0) {
-                libIdForIsbn = findIsbnLibrary(isbn, copies);
-            }
-            entries.push({
-                id: bk.id,
-                isbn,
-                title: bk.title ?? null,
-                authors: bk.authors ?? [],
-                cover_url: bk.cover_url ?? null,
-                library_id: libIdForIsbn,
-            });
-        }
-
-        // Also include standalone books from book_copies (no-ISBN, not yet cataloged)
-        for (const copy of (copies || [])) {
-            if (!isbnSet.has(copy.book_isbn ?? '')) {
+        for (const copy of copiesToConsider) {
+            const isbn = copy.book_isbn ?? '';
+            
+            if (!seenIsbns.has(isbn)) {
+                seenIsbns.add(isbn);
+                
+                // Find the corresponding book in the books table for metadata
+                const book = allBooks?.find(b => (b.isbn ?? '') === isbn);
+                
                 entries.push({
-                    id: 'copy-' + copy.id,
-                    isbn: copy.book_isbn ?? '',
-                    title: null,
-                    authors: [],
-                    cover_url: null,
+                    id: book ? book.id : 'copy-' + copy.id,
+                    isbn,
+                    title: book?.title ?? null,
+                    authors: book?.authors ?? [],
+                    cover_url: book?.cover_url ?? null,
                     library_id: copy.library_id,
                 });
             }
         }
 
-        // Filter by selected library
-        let filtered = entries;
-        if (libId) {
-            filtered = entries.filter(e => e.library_id === libId);
-        }
-
         // Apply search filter
+        let filtered = entries;
         if (query) {
             const q = query.toLowerCase();
             filtered = filtered.filter(
@@ -101,6 +84,7 @@ function CatalogContent() {
                      (e.isbn || '').includes(query)
             );
         }
+
 
         setBooks(filtered);
     } catch (err) {
