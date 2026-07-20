@@ -41,14 +41,28 @@ type RefHandle = { resetForm: () => void };
 const AddBookDialogComponent = forwardRef<
   RefHandle,
   { isOpen: boolean; onClose: () => void; profile?: Profile | null }
->(({ isOpen, onClose, profile }, ref) => {
-  const { profileLoading } = useAuth();
-  const { user } = useAuth();
+>(({ isOpen, onClose, profile: propProfile }, ref) => {
+  const auth = useAuth();
+  const { profileLoading } = auth;
+  const { user } = auth;
+  const profile = propProfile ?? auth.profile;
 
-  /* ── Early gates ────────────────────── */
+  /* ── Gates (must be after all hooks) ── */
+  if (!isOpen) return null;
   if (!user) return null;
-  if (!profile || profileLoading) return null; // wait for profile load
-  if (profile.role === 'patron') return null; // patrons never add books
+  if (!profile || profileLoading) {
+    // Dialog is open but auth not ready — render an empty shell
+    // so React keeps the component alive and it will re-render
+    // once auth resolves.
+    return (
+      <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/70">
+        <div className="w-full max-w-md rounded-xl bg-white shadow-xl p-6 text-center">
+          <p className="text-sm text-slate-500">Loading…</p>
+        </div>
+      </div>
+    );
+  }
+  if (profile.role === 'patron') return null;
 
   /* ── Derived: which libraries does this user manage? ── */
   const isOwner = profile.role === 'library_owner';
