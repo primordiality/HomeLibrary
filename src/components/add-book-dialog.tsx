@@ -251,10 +251,10 @@ const AddBookDialogComponent = forwardRef<
         throw saveResult.error;
           }
 
-         // Insert book_copies only when ISBN exists
-      if (hasISBN && selectedLibraryId) {
-        await supabase.from('book_copies').insert({
-          book_isbn: cleaned,
+          // Insert book_copies for every library (ISBN present or not)
+        if (selectedLibraryId) {
+          await supabase.from('book_copies').insert({
+            book_isbn: hasISBN ? cleaned : null,
           library_id: selectedLibraryId,
           location_id: null,
           barcode: null,
