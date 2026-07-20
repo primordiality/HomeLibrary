@@ -91,7 +91,7 @@ function CatalogContent() {
                 subtitle: book?.subtitle ?? null,
                 authors: book?.authors ?? [],
                 cover_url: book?.cover_url ?? null,
-                isbn: copy.book_isbn ?? null,
+                isbn: (book as any)?.isbn ?? null,
                 library_id: copy.library_id,
             });
         }
