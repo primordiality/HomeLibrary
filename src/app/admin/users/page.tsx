@@ -15,6 +15,7 @@ export default function AdminUsers() {
   const [modalEmail, setModalEmail] = useState("");
   const [modalPassword, setModalPassword] = useState("");
   const [modalRole, setModalRole] = useState<Profile["role"]>("patron");
+  const [sendInvite, setSendInvite] = useState(false);
   const [skipConfirmation, setSkipConfirmation] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [toast, setToast] = useState<string | null>(null);
@@ -76,12 +77,17 @@ export default function AdminUsers() {
   const handleCreateUser = async () => {
     setError(null);
 
-    if (!modalName.trim() || !modalEmail.trim() || !modalPassword.trim()) {
-      setError("All fields are required.");
+    if (!modalName.trim() || !modalEmail.trim()) {
+      setError("Name and email are required.");
       return;
     }
 
-    if (modalPassword.length < 6) {
+    if (!sendInvite && !modalPassword.trim()) {
+      setError("Password is required when using manual password entry.");
+      return;
+    }
+
+    if (!sendInvite && modalPassword.length < 6) {
       setError("Password must be at least 6 characters.");
       return;
     }
@@ -89,33 +95,86 @@ export default function AdminUsers() {
     setCreating(true);
 
     try {
-      // Use public signup (anon-key safe) then promote via profile update
-      const { data: authData, error: authErr } = await supabase.auth.signUp({
-        email: modalEmail,
-        password: modalPassword,
-        options: { data: { display_name: modalName.trim(), role: modalRole } },
-      });
+      const userMetadata = { display_name: modalName.trim(), role: modalRole };
 
-      if (authErr) {
-        if (authErr.message?.includes("already registered")) {
-          setError("A user with this email already exists.");
+      if (sendInvite) {
+        // ── Invite via email (uses Edge Function with service role key) ──
+        const response = await fetch(
+          `${process.env.NEXT_PUBLIC_SUPABASE_URL!}/functions/v1/send-invite`,
+          {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!}`,
+            },
+            body: JSON.stringify({ email: modalEmail, data: userMetadata }),
+          }
+        );
+
+        const result = await response.json();
+
+        if (!response.ok) {
+          setError(`Failed to send invite: ${result.error}`);
           setCreating(false);
           return;
         }
-        setError(`Failed to create user: ${authErr.message}`);
-        setCreating(false);
-        return;
-      }
 
-      if (authData?.user) {
-        // The trigger creates the profile with role='patron', status='pending'
-        // Update to the chosen role and auto-activate
-        await supabase
+        // Wait for auth trigger to create profile, then update role/status
+        await new Promise((resolve) => setTimeout(resolve, 1000));
+
+        const { data: existingProfile } = await supabase
           .from("profiles")
-          .update({ role: modalRole, status: "active" })
-          .eq("id", authData.user.id);
+          .select("id")
+          .eq("email", modalEmail)
+          .single();
 
-        showToast(`User "${modalName}" created as ${modalRole}.`);
+        if (existingProfile) {
+          await supabase
+            .from("profiles")
+            .update({ role: modalRole, status: "active" })
+            .eq("id", existingProfile.id);
+        } else {
+          // Try to find user by email in auth.users
+          const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
+          const { data: authUsers } = await supabase.auth.admin.listUsers();
+          const authUser = authUsers?.users.find((u: any) => u.email === modalEmail);
+          if (authUser) {
+            await supabase
+              .from("profiles")
+              .update({ role: modalRole, status: "active" })
+              .eq("id", authUser.id);
+          }
+        }
+
+        showToast(`Invite sent to "${modalName}" (${modalEmail}).`);
+      } else {
+        // ── Manual password: create via auth (uses anon key) ──
+        const { data: authData, error: authErr } = await supabase.auth.signUp({
+          email: modalEmail,
+          password: modalPassword,
+          options: { data: userMetadata },
+        });
+
+        if (authErr) {
+          if (authErr.message?.includes("already registered")) {
+            setError("A user with this email already exists.");
+          } else {
+            setError(`Failed to create user: ${authErr.message}`);
+          }
+          setCreating(false);
+          return;
+        }
+
+        if (authData?.user) {
+          // The trigger creates the profile with role='patron', status='pending'
+          // Update to the chosen role and auto-activate
+          await supabase
+            .from("profiles")
+            .update({ role: modalRole, status: "active" })
+            .eq("id", authData.user.id);
+
+          showToast(`User "${modalName}" created as ${modalRole}.`);
+        }
       }
 
       setShowModal(false);
@@ -123,6 +182,7 @@ export default function AdminUsers() {
       setModalEmail("");
       setModalPassword("");
       setModalRole("patron");
+      setSendInvite(false);
       setSkipConfirmation(true);
       await loadUsers();
     } catch (e) {
