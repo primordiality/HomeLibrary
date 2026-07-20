@@ -18,6 +18,7 @@ export default function AdminUsers() {
   const [skipConfirmation, setSkipConfirmation] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [toast, setToast] = useState<string | null>(null);
+  const [creating, setCreating] = useState(false);
   const { user } = useAuth();
   const selfId = user?.id;
   const adminCount = users.filter(u => u.role === "system_admin").length;
@@ -85,41 +86,49 @@ export default function AdminUsers() {
       return;
     }
 
+    setCreating(true);
+
     try {
       // Use public signup (anon-key safe) then promote via profile update
       const { data: authData, error: authErr } = await supabase.auth.signUp({
         email: modalEmail,
         password: modalPassword,
-        options: { data: { display_name: modalName.trim() } },
+        options: { data: { display_name: modalName.trim(), role: modalRole } },
       });
 
       if (authErr) {
         if (authErr.message?.includes("already registered")) {
           setError("A user with this email already exists.");
+          setCreating(false);
           return;
         }
         setError(`Failed to create user: ${authErr.message}`);
+        setCreating(false);
         return;
       }
 
-      // The trigger creates the profile with role='patron', status='pending'
-      // Update to the chosen role and auto-activate
       if (authData?.user) {
+        // The trigger creates the profile with role='patron', status='pending'
+        // Update to the chosen role and auto-activate
         await supabase
           .from("profiles")
           .update({ role: modalRole, status: "active" })
           .eq("id", authData.user.id);
 
         showToast(`User "${modalName}" created as ${modalRole}.`);
-        setShowModal(false);
-        setModalName("");
-        setModalEmail("");
-        setModalPassword("");
-        setModalRole("patron");
-        await loadUsers();
       }
+
+      setShowModal(false);
+      setModalName("");
+      setModalEmail("");
+      setModalPassword("");
+      setModalRole("patron");
+      setSkipConfirmation(true);
+      await loadUsers();
     } catch (e) {
       setError("Failed to create user. Check your connection.");
+    } finally {
+      setCreating(false);
     }
   };
 
@@ -252,7 +261,7 @@ export default function AdminUsers() {
       {/* Create User Modal */}
       {showModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
-          <div className="w-full max-w-md bg-white rounded-xl shadow-xl p-6 space-y-4">
+          <div className="w-full max-w-md bg-white rounded-xl shadow-xl p-6 space-y-4 max-h-[90vh] overflow-y-auto">
             <div className="flex items-center justify-between">
               <h2 className="text-lg font-semibold text-slate-900">Create User</h2>
               <button
@@ -354,14 +363,16 @@ export default function AdminUsers() {
               <button
                 onClick={() => setShowModal(false)}
                 className="flex-1 px-4 py-2 text-sm font-medium text-slate-700 bg-white border border-slate-300 rounded-lg hover:bg-slate-50 transition"
+                disabled={creating}
               >
                 Cancel
               </button>
               <button
                 onClick={handleCreateUser}
-                className="flex-1 px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded-lg hover:bg-blue-700 transition"
+                className="flex-1 px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded-lg hover:bg-blue-700 transition disabled:opacity-50"
+                disabled={creating}
               >
-                Create User
+                {creating ? "Creating…" : "Create User"}
               </button>
             </div>
           </div>

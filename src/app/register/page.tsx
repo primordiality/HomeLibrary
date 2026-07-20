@@ -1,8 +1,9 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/contexts/AuthContext";
+import { supabase } from "@/lib/supabase/client";
 
 export default function Register() {
   const [email, setEmail] = useState("");
@@ -10,9 +11,92 @@ export default function Register() {
   const [name, setName] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [registrationEnabled, setRegistrationEnabled] = useState<boolean | null>(null);
   const router = useRouter();
 
   const { signUp } = useAuth();
+
+  // Check if public registration is available anywhere
+  useEffect(() => {
+    (async () => {
+      try {
+        const { data, error } = await supabase
+          .from("library_settings")
+          .select("library_id, allow_public_registration")
+          .eq("allow_public_registration", true)
+          .limit(1);
+
+        if (!error && data && data.length > 0) {
+          setRegistrationEnabled(true);
+        } else {
+          setRegistrationEnabled(false);
+        }
+      } catch {
+        setRegistrationEnabled(false);
+      }
+    })();
+  }, []);
+
+  // Show "not available" page when registration is disabled
+  if (registrationEnabled === false) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-slate-50 to-slate-100">
+        <div className="w-full max-w-md p-8 space-y-6 bg-white rounded-xl shadow-lg text-center">
+          <div className="text-center">
+            <h1 className="text-2xl font-bold tracking-tight text-slate-900">Librarium</h1>
+          </div>
+
+          <div className="mx-auto w-16 h-16 rounded-full bg-slate-100 flex items-center justify-center">
+            <svg className="w-8 h-8 text-slate-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636" />
+            </svg>
+          </div>
+
+          <div className="space-y-2">
+            <h2 className="text-lg font-semibold text-slate-900">Registration Not Available</h2>
+            <p className="text-sm text-slate-500">
+              Public registration is currently disabled. No library in the system
+              has enabled public sign-up at this time.
+            </p>
+          </div>
+
+          <div className="p-4 bg-slate-50 rounded-lg border border-slate-200 text-left space-y-1">
+            <p className="text-sm text-slate-600">
+              <span className="font-medium">What can you do?</span>
+            </p>
+            <ul className="text-sm text-slate-500 list-disc list-inside space-y-1">
+              <li>Contact a library administrator to request an account</li>
+              <li>An admin can create an account and send you an invite email</li>
+            </ul>
+          </div>
+
+          <div className="flex gap-3">
+            <a
+              href="/signin"
+              className="flex-1 px-4 py-2.5 text-center text-slate-700 bg-white border border-slate-300 rounded-lg hover:bg-slate-50 font-medium transition"
+            >
+              Sign In
+            </a>
+            <a
+              href="/"
+              className="flex-1 px-4 py-2.5 text-center text-slate-700 bg-white border border-slate-300 rounded-lg hover:bg-slate-50 font-medium transition"
+            >
+              Go to Dashboard
+            </a>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // While loading the registration status, show nothing (or a loading state)
+  if (registrationEnabled === null) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-slate-50 to-slate-100">
+        <div className="text-center text-slate-500">Loading…</div>
+      </div>
+    );
+  }
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();

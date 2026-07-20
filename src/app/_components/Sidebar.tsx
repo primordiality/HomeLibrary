@@ -2,7 +2,7 @@
 import Link from 'next/link'
 import { useAuth } from '@/contexts/AuthContext'
 import { usePathname } from 'next/navigation'
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { supabase } from '@/lib/supabase/client'
 
 interface MenuItem {
@@ -14,6 +14,7 @@ export function Sidebar() {
     const pathname = usePathname()
     const { user, loading: authLoading, signOut } = useAuth()
     const [isAdmin, setIsAdmin] = useState(false)
+    const [registrationEnabled, setRegistrationEnabled] = useState(false)
 
     useEffect(() => {
         let cancelled = false
@@ -21,20 +22,40 @@ export function Sidebar() {
             try {
                 if (!user) {
                     setIsAdmin(false)
+                    setRegistrationEnabled(false)
                     return
                 }
-                const { data, error } = await supabase
+
+                // Check if user is system_admin
+                const { data: profile, error: profileErr } = await supabase
                     .from('profiles')
                     .select('role')
                     .eq('id', user.id)
                     .single()
-                if (error) {
+
+                if (!profileErr && profile?.role === 'system_admin') {
+                    setIsAdmin(true)
+                } else {
                     setIsAdmin(false)
-                    return
                 }
-                if (!cancelled) setIsAdmin(data?.role === 'system_admin')
+
+                // Check if any library has public registration enabled
+                const { data: settings, error: settingsErr } = await supabase
+                    .from('library_settings')
+                    .select('library_id, allow_public_registration')
+                    .eq('allow_public_registration', true)
+                    .limit(1)
+
+                if (!settingsErr && settings && settings.length > 0) {
+                    setRegistrationEnabled(true)
+                } else {
+                    setRegistrationEnabled(false)
+                }
             } catch {
-                if (!cancelled) setIsAdmin(false)
+                if (!cancelled) {
+                    setIsAdmin(false)
+                    setRegistrationEnabled(false)
+                }
             }
         })()
         return () => { cancelled = true }
@@ -48,11 +69,11 @@ export function Sidebar() {
             { href: '/patrons', label: 'Patrons' },
             { href: '/borrowings', label: 'Borrowings' },
             { href: '/analytics', label: 'Analytics' },
-            ...(isAdmin ? [{ href: '/admin/users', label: 'User Management' }] : []),
+            ...(isAdmin ? [{ href: '/admin', label: 'Admin' }] : []),
         ]
         : [
             { href: '/signin', label: 'Sign In' },
-            { href: '/register', label: 'Register' },
+            ...(registrationEnabled ? [{ href: '/register', label: 'Register' }] : []),
         ]
 
     return (
