@@ -5,10 +5,10 @@ import { supabase } from "@/lib/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import type { Profile } from "@/types/db";
 
-type UserRow = Profile;
+type AdminUserRow = Profile;
 
 export default function AdminUsers() {
-  const [users, setUsers] = useState<UserRow[]>([]);
+  const [users, setUsers] = useState<AdminUserRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [showModal, setShowModal] = useState(false);
   const [modalName, setModalName] = useState("");
@@ -16,26 +16,25 @@ export default function AdminUsers() {
   const [modalPassword, setModalPassword] = useState("");
   const [modalRole, setModalRole] = useState<Profile["role"]>("patron");
   const [sendInvite, setSendInvite] = useState(false);
-  const [skipConfirmation, setSkipConfirmation] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [toast, setToast] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
   const { user } = useAuth();
   const selfId = user?.id;
-  const adminCount = users.filter(u => u.role === "system_admin" && u.status === "active").length;
+  const adminCount = users.filter(u => u.role === "system_admin").length;
 
   const loadUsers = useCallback(async () => {
     try {
       const { data, error } = await supabase
         .from("profiles")
-        .select("id, name, email, role, status, created_at")
+        .select("id, name, email, role, created_at")
         .order("created_at", { ascending: false });
 
       if (error) {
         setError(`Failed to load users: ${error.message}`);
         return;
       }
-      setUsers((data ?? []) as UserRow[]);
+      setUsers((data ?? []) as AdminUserRow[]);
     } catch (e) {
       setError("Network error loading users.");
     } finally {
@@ -50,28 +49,6 @@ export default function AdminUsers() {
   const showToast = (msg: string) => {
     setToast(msg);
     setTimeout(() => setToast(null), 3000);
-  };
-
-  const handleAction = async (userId: string, name: string, action: "approve" | "suspend") => {
-    const newStatus = action === "approve" ? "active" : "suspended";
-    const actionLabel = action === "approve" ? "approved" : "suspended";
-
-    try {
-      const { error } = await supabase
-        .from("profiles")
-        .update({ status: newStatus })
-        .eq("id", userId);
-
-      if (error) {
-        setError(`Failed to ${action} user: ${error.message}`);
-        return;
-      }
-
-      showToast(`${name} has been ${actionLabel}.`);
-      await loadUsers();
-    } catch (e) {
-      setError(`Failed to ${action} user.`);
-    }
   };
 
   const handleCreateUser = async () => {
@@ -119,7 +96,7 @@ export default function AdminUsers() {
           return;
         }
 
-        // Wait for auth trigger to create profile, then update role/status
+        // Wait for auth trigger to create profile, then update role
         await new Promise((resolve) => setTimeout(resolve, 1000));
 
         const { data: existingProfile } = await supabase
@@ -131,17 +108,16 @@ export default function AdminUsers() {
         if (existingProfile) {
           await supabase
             .from("profiles")
-            .update({ role: modalRole, status: "active" })
+            .update({ role: modalRole })
             .eq("id", existingProfile.id);
         } else {
           // Try to find user by email in auth.users
-          const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
           const { data: authUsers } = await supabase.auth.admin.listUsers();
           const authUser = authUsers?.users.find((u: any) => u.email === modalEmail);
           if (authUser) {
             await supabase
               .from("profiles")
-              .update({ role: modalRole, status: "active" })
+              .update({ role: modalRole })
               .eq("id", authUser.id);
           }
         }
@@ -166,11 +142,11 @@ export default function AdminUsers() {
         }
 
         if (authData?.user) {
-          // The trigger creates the profile with role='patron', status='pending'
-          // Update to the chosen role and auto-activate
+          // The trigger creates the profile with role='patron'
+          // Update to the chosen role
           await supabase
             .from("profiles")
-            .update({ role: modalRole, status: "active" })
+            .update({ role: modalRole })
             .eq("id", authData.user.id);
 
           showToast(`User "${modalName}" created as ${modalRole}.`);
@@ -183,7 +159,6 @@ export default function AdminUsers() {
       setModalPassword("");
       setModalRole("patron");
       setSendInvite(false);
-      setSkipConfirmation(true);
       await loadUsers();
     } catch (e) {
       setError("Failed to create user. Check your connection.");
@@ -198,7 +173,7 @@ export default function AdminUsers() {
         <div>
           <h1 className="text-2xl font-bold text-slate-900">User Management</h1>
           <p className="text-sm text-slate-500 mt-1">
-            Manage user accounts, approve registrations, and assign roles.
+            Manage user accounts and assign roles.
           </p>
         </div>
         <button
@@ -231,7 +206,7 @@ export default function AdminUsers() {
                 <th className="px-4 py-3">Name</th>
                 <th className="px-4 py-3">Email</th>
                 <th className="px-4 py-3">Role</th>
-                <th className="px-4 py-3">Status</th>
+                <th className="px-4 py-3">Registered</th>
                 <th className="px-4 py-3 text-right">Actions</th>
               </tr>
             </thead>
@@ -245,9 +220,8 @@ export default function AdminUsers() {
               ) : (
                 users.map((u) => {
                   const isPatron = u.role === "patron";
-                  const isPending = u.status === "pending";
-                  const isSuspended = u.status === "suspended";
-                  const isActive = u.status === "active";
+                  const isSysAdmin = u.role === "system_admin";
+                  const isSelf = u.id === selfId;
 
                   return (
                     <tr key={u.id} className="hover:bg-slate-50 transition">
@@ -256,57 +230,47 @@ export default function AdminUsers() {
                       </td>
                       <td className="px-4 py-3 text-slate-600">{u.email || "—"}</td>
                       <td className="px-4 py-3">
-                        <span className="inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium bg-slate-100 text-slate-700">
-                          {u.role}
+                        <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${
+                          isSysAdmin
+                            ? "bg-purple-100 text-purple-800"
+                            : u.role === "library_owner"
+                            ? "bg-blue-100 text-blue-800"
+                            : u.role === "librarian"
+                            ? "bg-teal-100 text-teal-800"
+                            : "bg-slate-100 text-slate-700"
+                        }`}>
+                          {u.role.replace("_", " ")}
                         </span>
                       </td>
-                      <td className="px-4 py-3">
-                        {isPending && (
-                          <span className="inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium bg-amber-100 text-amber-800">
-                            Pending
-                          </span>
-                        )}
-                        {isActive && (
-                          <span className="inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium bg-green-100 text-green-800">
-                            Active
-                          </span>
-                        )}
-                        {isSuspended && (
-                          <span className="inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium bg-red-100 text-red-800">
-                            Suspended
-                          </span>
-                        )}
+                      <td className="px-4 py-3 text-slate-500">
+                        {u.created_at ? new Date(u.created_at).toLocaleDateString() : "—"}
                       </td>
                       <td className="px-4 py-3 text-right space-x-2">
-                        {isPatron && isPending && (
+                        {!isSysAdmin && !isSelf && (
                           <button
-                            onClick={() => handleAction(u.id, u.name || "User", "approve")}
-                            className="text-xs font-medium text-green-700 bg-green-50 hover:bg-green-100 px-2.5 py-1 rounded border border-green-200 transition"
+                            onClick={async () => {
+                              try {
+                                const { error } = await supabase
+                                  .from("profiles")
+                                  .update({ role: "system_admin" })
+                                  .eq("id", u.id);
+                                if (error) {
+                                  setError(`Failed to promote: ${error.message}`);
+                                  return;
+                                }
+                                showToast(`${u.name || "User"} promoted to system admin.`);
+                                await loadUsers();
+                              } catch (e) {
+                                setError("Failed to promote user.");
+                              }
+                            }}
+                            className="text-xs font-medium text-purple-700 bg-purple-50 hover:bg-purple-100 px-2.5 py-1 rounded border border-purple-200 transition"
                           >
-                            Approve
+                            Promote
                           </button>
                         )}
-                        {isActive && u.id !== selfId && adminCount > 1 && (
-                          <button
-                            onClick={() => handleAction(u.id, u.name || "User", "suspend")}
-                            className="text-xs font-medium text-red-700 bg-red-50 hover:bg-red-100 px-2.5 py-1 rounded border border-red-200 transition"
-                          >
-                            Suspend
-                          </button>
-                        )}
-                        {isActive && (u.id === selfId || adminCount <= 1) && (
-                          <span className="text-xs font-medium text-slate-400" title={u.id === selfId ? "You cannot suspend yourself" : "Need at least one active system admin"}>—</span>
-                        )}
-                        {isSuspended && u.id !== selfId && (
-                          <button
-                            onClick={() => handleAction(u.id, u.name || "User", "approve")}
-                            className="text-xs font-medium text-amber-700 bg-amber-50 hover:bg-amber-100 px-2.5 py-1 rounded border border-amber-200 transition"
-                          >
-                            Re-activate
-                          </button>
-                        )}
-                        {isSuspended && u.id === selfId && (
-                          <span className="text-xs font-medium text-slate-400" title="Account suspended — contact another admin">—</span>
+                        {isSelf && (
+                          <span className="text-xs font-medium text-slate-400">You</span>
                         )}
                       </td>
                     </tr>
@@ -385,24 +349,14 @@ export default function AdminUsers() {
 
               <div className="flex items-start gap-2">
                 <input
-                  id="skip-confirmation"
+                  id="send-invite"
                   type="checkbox"
-                  checked={skipConfirmation}
-                  onChange={(e) => setSkipConfirmation(e.target.checked)}
+                  checked={sendInvite}
+                  onChange={(e) => setSendInvite(e.target.checked)}
                   className="mt-1 h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
                 />
-                <label htmlFor="skip-confirmation" className="text-sm text-slate-600">
-                  Skip admin approval (auto-approve)
-                  {skipConfirmation && (
-                    <span className="block text-xs text-slate-400 mt-1">
-                      The user is auto-approved — they just need to confirm their email.
-                    </span>
-                  )}
-                  {!skipConfirmation && (
-                    <span className="block text-xs text-slate-400 mt-1">
-                      Requires admin to manually approve in the Users list.
-                    </span>
-                  )}
+                <label htmlFor="send-invite" className="text-sm text-slate-600">
+                  Send invitation email (user sets their own password)
                 </label>
               </div>
 

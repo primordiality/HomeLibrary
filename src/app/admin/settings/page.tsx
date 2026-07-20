@@ -12,19 +12,11 @@ type PendingUser = {
   created_at: string;
 };
 
-type RegLibrary = {
-  library_id: string;
-  library_name: string;
-  allow_public_registration: boolean;
-};
-
 export default function AdminSettings() {
-  const [pendingUsers, setPendingUsers] = useState<PendingUser[]>([]);
-  const [librariesWithRegistration, setLibrariesWithRegistration] = useState<RegLibrary[]>([]);
-  const [libraryList, setLibraryList] = useState<{ id: string; name: string }[]>([]);
+  const [users, setUsers] = useState<PendingUser[]>([]);
+  const [libraries, setLibraries] = useState<{ id: string; name: string }[]>([]);
   const [loading, setLoading] = useState(true);
   const [toast, setToast] = useState<string | null>(null);
-  const [savingLibrary, setSavingLibrary] = useState<string | null>(null);
   const { user } = useAuth();
 
   const showToast = (msg: string) => {
@@ -34,42 +26,23 @@ export default function AdminSettings() {
 
   const loadData = useCallback(async () => {
     try {
-      // Load all pending users across all libraries
-      const { data: pending } = await supabase
+      // Load all users
+      const { data: allUsers, error: usersErr } = await supabase
         .from("profiles")
         .select("id, name, email, role, created_at")
-        .eq("status", "pending")
         .order("created_at", { ascending: true });
 
-      // Load all libraries with their registration settings
-      const { data: libs } = await supabase
+      // Load all libraries
+      const { data: libs, error: libsErr } = await supabase
         .from("libraries")
         .select("id, name")
         .order("name");
 
-      const { data: settings } = await supabase
-        .from("library_settings")
-        .select("library_id, allow_public_registration");
+      if (usersErr) console.error("Failed to load profiles:", usersErr.message);
+      if (libsErr) console.error("Failed to load libraries:", libsErr.message);
 
-      const settingsMap = new Map<string, boolean>();
-      if (settings) {
-        settings.forEach((s) => settingsMap.set(s.library_id, s.allow_public_registration));
-      }
-
-      const regLibraries: RegLibrary[] = [];
-      if (libs) {
-        libs.forEach((lib) => {
-          regLibraries.push({
-            library_id: lib.id,
-            library_name: lib.name,
-            allow_public_registration: settingsMap.get(lib.id) ?? false,
-          });
-        });
-      }
-
-      setPendingUsers((pending ?? []) as PendingUser[]);
-      setLibraryList(libs ?? []);
-      setLibrariesWithRegistration(regLibraries);
+      setUsers((allUsers ?? []) as PendingUser[]);
+      setLibraries(libs ?? []);
     } catch (err) {
       console.error("Failed to load admin settings:", err);
     } finally {
@@ -81,83 +54,50 @@ export default function AdminSettings() {
     loadData();
   }, [loadData]);
 
-  const handleApprove = async (userId: string, name: string) => {
+  const handlePromote = async (userId: string, name: string) => {
     try {
       const { error } = await supabase
         .from("profiles")
-        .update({ status: "active" })
+        .update({ role: "system_admin" })
         .eq("id", userId);
 
       if (error) {
-        showToast(`Failed to approve ${name}: ${error.message}`);
+        showToast(`Failed to promote ${name}: ${error.message}`);
         return;
       }
 
-      showToast(`${name} has been approved.`);
+      showToast(`${name} promoted to system admin.`);
       await loadData();
     } catch (err) {
-      showToast(`Failed to approve ${name}.`);
+      showToast(`Failed to promote ${name}.`);
     }
   };
 
-  const handleSuspend = async (userId: string, name: string) => {
+  const handleDemote = async (userId: string, name: string) => {
     try {
       const { error } = await supabase
         .from("profiles")
-        .update({ status: "suspended" })
+        .update({ role: "patron" })
         .eq("id", userId);
 
       if (error) {
-        showToast(`Failed to suspend ${name}: ${error.message}`);
+        showToast(`Failed to demote ${name}: ${error.message}`);
         return;
       }
 
-      showToast(`${name} has been suspended.`);
+      showToast(`${name} demoted to patron.`);
       await loadData();
     } catch (err) {
-      showToast(`Failed to suspend ${name}.`);
+      showToast(`Failed to demote ${name}.`);
     }
   };
-
-  const handleToggleRegistration = async (libraryId: string, enabled: boolean) => {
-    setSavingLibrary(libraryId);
-    try {
-      const { error } = await supabase
-        .from("library_settings")
-        .upsert(
-          {
-            library_id: libraryId,
-            allow_public_registration: enabled,
-          },
-          { onConflict: "library_id" }
-        );
-
-      if (error) {
-        showToast(`Failed to update settings: ${error.message}`);
-        return;
-      }
-
-      showToast(`Registration ${enabled ? "enabled" : "disabled"} for library.`);
-      await loadData();
-    } catch (err) {
-      showToast(`Failed to update settings.`);
-    } finally {
-      setSavingLibrary(null);
-    }
-  };
-
-  const totalPending = pendingUsers.length;
-  const totalLibraries = libraryList.length;
-  const totalRegistered = librariesWithRegistration.filter(
-    (l) => l.allow_public_registration
-  ).length;
 
   return (
     <div className="space-y-8">
       <header>
-        <h1 className="text-3xl font-bold tracking-tight text-slate-900">Global Admin Settings</h1>
+        <h1 className="text-3xl font-bold tracking-tight text-slate-900">Admin Settings</h1>
         <p className="mt-2 text-sm text-slate-500">
-          System-wide control center for user management and registration.
+          System-wide user management and settings.
         </p>
       </header>
 
@@ -173,105 +113,45 @@ export default function AdminSettings() {
           <div className="flex items-center justify-between">
             <span className="text-2xl">👥</span>
             <span className="text-3xl font-bold tracking-tight">
-              {loading ? "—" : `${totalLibraries}`}
+              {loading ? "—" : `${users.length}`}
             </span>
           </div>
-          <p className="mt-1 text-sm font-medium text-slate-600">Total Libraries</p>
+          <p className="mt-1 text-sm font-medium text-slate-600">Total Users</p>
         </div>
 
         <div className="rounded-xl border bg-white p-6 shadow-sm">
           <div className="flex items-center justify-between">
-            <span className="text-2xl">🔓</span>
+            <span className="text-2xl">📚</span>
             <span className="text-3xl font-bold tracking-tight">
-              {loading ? "—" : `${totalRegistered}`}
+              {loading ? "—" : `${libraries.length}`}
             </span>
           </div>
-          <p className="mt-1 text-sm font-medium text-slate-600">Libraries with Public Registration</p>
+          <p className="mt-1 text-sm font-medium text-slate-600">Libraries</p>
         </div>
 
         <div className="rounded-xl border bg-white p-6 shadow-sm">
           <div className="flex items-center justify-between">
-            <span className="text-2xl">⏳</span>
+            <span className="text-2xl">🔧</span>
             <span className="text-3xl font-bold tracking-tight">
-              {loading ? "—" : `${totalPending}`}
+              {loading ? "—" : `${users.filter(u => u.role === 'system_admin').length}`}
             </span>
           </div>
-          <p className="mt-1 text-sm font-medium text-slate-600">Users Pending Approval</p>
+          <p className="mt-1 text-sm font-medium text-slate-600">System Admins</p>
         </div>
       </div>
 
-      {/* Library Registration Settings */}
+      {/* All Users */}
       <section className="rounded-xl border bg-white p-6 shadow-sm">
-        <h2 className="text-lg font-semibold mb-4">Library Registration Settings</h2>
+        <h2 className="text-lg font-semibold mb-4">All Users</h2>
         <p className="text-sm text-slate-500 mb-4">
-          Control which libraries allow public registration. When enabled, users can sign up via /register.
-        </p>
-
-        {loading ? (
-          <p className="text-sm text-slate-400">Loading libraries…</p>
-        ) : libraryList.length === 0 ? (
-          <p className="text-sm text-slate-400">No libraries found.</p>
-        ) : (
-          <div className="space-y-3">
-            {libraryList.map((lib) => {
-              const settings = librariesWithRegistration.find(
-                (l) => l.library_id === lib.id
-              );
-              const enabled = settings?.allow_public_registration ?? false;
-              const isSaving = savingLibrary === lib.id;
-
-              return (
-                <div
-                  key={lib.id}
-                  className="flex items-center justify-between p-3 rounded-lg border border-slate-200 bg-slate-50"
-                >
-                  <div>
-                    <p className="text-sm font-medium text-slate-900">{lib.name}</p>
-                    <p className="text-xs text-slate-500">
-                      Library ID: {lib.id}
-                    </p>
-                  </div>
-                  <div className="flex items-center gap-3">
-                    <span
-                      className={`text-xs font-medium px-2 py-1 rounded-full ${
-                        enabled
-                          ? "bg-green-100 text-green-800"
-                          : "bg-slate-100 text-slate-600"
-                      }`}
-                    >
-                      {enabled ? "Public Registration ON" : "Public Registration OFF"}
-                    </span>
-                    <button
-                      onClick={() => handleToggleRegistration(lib.id, !enabled)}
-                      disabled={isSaving}
-                      className={`px-3 py-1.5 text-xs font-medium rounded-lg transition ${
-                        enabled
-                          ? "bg-red-100 text-red-700 hover:bg-red-200"
-                          : "bg-green-100 text-green-700 hover:bg-green-200"
-                      } disabled:opacity-50`}
-                    >
-                      {isSaving ? "Saving…" : enabled ? "Disable" : "Enable"}
-                    </button>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        )}
-      </section>
-
-      {/* Pending Users */}
-      <section className="rounded-xl border bg-white p-6 shadow-sm">
-        <h2 className="text-lg font-semibold mb-4">Users Pending Approval</h2>
-        <p className="text-sm text-slate-500 mb-4">
-          All users who have registered but are awaiting admin approval.
+          View and manage all registered users.
         </p>
 
         {loading ? (
           <p className="text-sm text-slate-400">Loading users…</p>
-        ) : totalPending === 0 ? (
+        ) : users.length === 0 ? (
           <div className="text-center py-8">
-            <p className="text-sm text-slate-400">No pending users.</p>
+            <p className="text-sm text-slate-400">No users yet.</p>
           </div>
         ) : (
           <div className="rounded-xl border border-slate-200 overflow-hidden">
@@ -286,33 +166,84 @@ export default function AdminSettings() {
                 </tr>
               </thead>
               <tbody className="divide-y">
-                {pendingUsers.map((u) => (
+                {users.map((u) => (
                   <tr key={u.id} className="hover:bg-slate-50 transition">
                     <td className="px-4 py-3 font-medium text-slate-900">
                       {u.name || "—"}
                     </td>
                     <td className="px-4 py-3 text-slate-600">{u.email || "—"}</td>
                     <td className="px-4 py-3">
-                      <span className="inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium bg-slate-100 text-slate-700">
-                        {u.role}
+                      <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${
+                        u.role === 'system_admin'
+                          ? 'bg-purple-100 text-purple-800'
+                          : u.role === 'library_owner'
+                          ? 'bg-blue-100 text-blue-800'
+                          : u.role === 'librarian'
+                          ? 'bg-teal-100 text-teal-800'
+                          : 'bg-slate-100 text-slate-700'
+                      }`}>
+                        {u.role.replace("_", " ")}
                       </span>
                     </td>
                     <td className="px-4 py-3 text-slate-500">
                       {u.created_at ? new Date(u.created_at).toLocaleDateString() : "—"}
                     </td>
                     <td className="px-4 py-3 text-right space-x-2">
-                      <button
-                        onClick={() => handleApprove(u.id, u.name || "User")}
-                        className="text-xs font-medium text-green-700 bg-green-50 hover:bg-green-100 px-2.5 py-1 rounded border border-green-200 transition"
-                      >
-                        Approve
-                      </button>
-                      <button
-                        onClick={() => handleSuspend(u.id, u.name || "User")}
-                        className="text-xs font-medium text-red-700 bg-red-50 hover:bg-red-100 px-2.5 py-1 rounded border border-red-200 transition"
-                      >
-                        Suspend
-                      </button>
+                      {u.role !== "system_admin" && (
+                        <button
+                          onClick={() => handlePromote(u.id, u.name || "User")}
+                          className="text-xs font-medium text-purple-700 bg-purple-50 hover:bg-purple-100 px-2.5 py-1 rounded border border-purple-200 transition"
+                        >
+                          Promote to Admin
+                        </button>
+                      )}
+                      {u.role === "system_admin" && (
+                        <button
+                          onClick={() => handleDemote(u.id, u.name || "User")}
+                          className="text-xs font-medium text-red-700 bg-red-50 hover:bg-red-100 px-2.5 py-1 rounded border border-red-200 transition"
+                        >
+                          Demote
+                        </button>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </section>
+
+      {/* Libraries */}
+      <section className="rounded-xl border bg-white p-6 shadow-sm">
+        <h2 className="text-lg font-semibold mb-4">Libraries</h2>
+        <p className="text-sm text-slate-500 mb-4">
+          Overview of all registered libraries.
+        </p>
+
+        {loading ? (
+          <p className="text-sm text-slate-400">Loading libraries…</p>
+        ) : libraries.length === 0 ? (
+          <div className="text-center py-8">
+            <p className="text-sm text-slate-400">No libraries yet.</p>
+          </div>
+        ) : (
+          <div className="rounded-xl border border-slate-200 overflow-hidden">
+            <table className="w-full text-sm">
+              <thead className="bg-slate-50 border-b">
+                <tr className="text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
+                  <th className="px-4 py-3">Name</th>
+                  <th className="px-4 py-3">ID</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y">
+                {libraries.map((lib) => (
+                  <tr key={lib.id} className="hover:bg-slate-50 transition">
+                    <td className="px-4 py-3 font-medium text-slate-900">
+                      {lib.name}
+                    </td>
+                    <td className="px-4 py-3 text-slate-500 font-mono text-xs">
+                      {lib.id}
                     </td>
                   </tr>
                 ))}
