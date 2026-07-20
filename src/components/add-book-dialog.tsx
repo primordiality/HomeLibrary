@@ -134,7 +134,7 @@ const AddBookDialogComponent = forwardRef<
         authors: (metadata.authors || []).join(', '),
         publisher: metadata.publisher || '',
         publishDate: String(metadata.publishDate),
-        pages: String(metadata.pages),
+        pages: metadata.pages ? String(metadata.pages) : '',
         coverUrl: metadata.coverUrl || '',
       });
       setStep('review');

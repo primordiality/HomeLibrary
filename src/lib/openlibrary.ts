@@ -37,7 +37,7 @@ async function fetchBookByIsbn(isbnRaw: string): Promise<{
         publisher: b.publisher_name?.[0],
         publishDate: b.first_publish_year ? `${b.first_publish_year}` : undefined,
         pages: b.number_of_pages,
-        coverUrl: `https://covers.openlibrary.org/b/id/${b.cover_edition_id}-M.jpg`,
+        coverUrl: b.cover_edition_id ? `https://covers.openlibrary.org/b/id/${b.cover_edition_id}-M.jpg` : undefined,
       };
     }
   } catch { /* fall through to strategy B */ }
@@ -55,7 +55,7 @@ async function fetchBookByIsbn(isbnRaw: string): Promise<{
         publisher: b.publisher_name?.[0],
         publishDate: b.first_publish_year ? `${b.first_publish_year}` : undefined,
         pages: b.number_of_pages,
-        coverUrl: `https://covers.openlibrary.org/b/id/${b.cover_edition_id}-M.jpg`,
+        coverUrl: b.cover_edition_id ? `https://covers.openlibrary.org/b/id/${b.cover_edition_id}-M.jpg` : undefined,
       };
     }
   } catch { /* fall through to strategy C */ }
@@ -72,7 +72,7 @@ async function fetchBookByIsbn(isbnRaw: string): Promise<{
         publisher: data.publishers?.[0],
         publishDate: data.first_publish_date,
         pages: data.number_of_pages,
-        coverUrl: `https://covers.openlibrary.org/b/id/${data.cover_edition_id}-M.jpg`,
+        coverUrl: data.cover_edition_id ? `https://covers.openlibrary.org/b/id/${data.cover_edition_id}-M.jpg` : undefined,
       };
     }
   } catch { /* fall through */ }
