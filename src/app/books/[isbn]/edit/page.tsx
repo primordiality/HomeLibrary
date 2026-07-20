@@ -73,9 +73,14 @@ export default function EditBookPage() {
 
    async function loadAllFallback(copyId: string) {
      setLoading(true); setErrorStr(null);
-      // Load the book_copies row directly (no ISBN to look up in books table)
-     const { data: copyData }: any = await supabase.from('book_copies').select('*').eq('id', copyId).single();
-     if (!copyData) { setErrorStr('Book not found'); setLoading(false); return; }
+       // Load the book_copies row directly (no ISBN to look up in books table)
+     const query = supabase.from('book_copies').select('*').eq('id', copyId).single();
+     const { data: copyData, error }: any = await query;
+     if (error || !copyData) { 
+       setErrorStr(`Copy not found. ${error?.message ? 'Check connection and try again.' : 'Try editing through Manage Books instead.'}`); 
+       setLoading(false); 
+       return; 
+     }
      setFallbackCopy(copyData);
       // book_copies may store title/author inline or rely on a books row with matching isbn — fall back to copying data here
      const copIsbn = copyData.book_isbn ?? '';
