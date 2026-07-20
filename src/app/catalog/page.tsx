@@ -2,20 +2,20 @@
 
 import { useState, useEffect, Suspense } from 'react';
 import Link from 'next/link';
-import { useSearchParams } from 'next/navigation';
+import { useSearchParams, useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabase/client';
 import AddBookDialog from '@/components/add-book-dialog';
 
 function CatalogContent() {
   const searchParams = useSearchParams();
-  const paramLibId = searchParams.get('library') ?? '';
+  const router = useRouter();
+  const activeLibId = searchParams.get('library') ?? '';
 
   const [books, setBooks] = useState([]);
   const [showDialog, setShowDialog] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [loading, setLoading] = useState(true);
   const [libraries, setLibraries] = useState([]);
-  const [activeLibId, setActiveLibId] = useState('');
 
     // Load libraries once on mount
   useEffect(() => {
@@ -25,14 +25,6 @@ function CatalogContent() {
        .then(({ data }) => { if (data) setLibraries(data); });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
-
-    // Sync active lib param after libraries load
-  useEffect(() => {
-    if (!libraries.length) return;
-    const p = searchParams.get('library');
-    setActiveLibId(p ?? '');
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [searchParams, libraries]);
 
     // Refresh catalog when library or search changes
   useEffect(() => {
@@ -95,17 +87,10 @@ function CatalogContent() {
             }
         }
 
-        // If a specific library is selected AND no books have that library_id,
-        // show ALL books so the user can see what exists
+        // Filter by selected library
         let filtered = entries;
         if (libId) {
-            const byLib = entries.filter(e => e.library_id === libId);
-            if (byLib.length > 0) {
-                filtered = byLib;
-            } else {
-                // Zero books for this library -- show all so user can see catalog
-                filtered = entries;
-            }
+            filtered = entries.filter(e => e.library_id === libId);
         }
 
         // Apply search filter
@@ -151,10 +136,9 @@ function CatalogContent() {
             value={activeLibId}
             onChange={(e) => {
               const v = e.target.value;
-              setActiveLibId(v);
               const params = new URLSearchParams(window.location.search);
               if (v) { params.set('library', v); } else { params.delete('library'); }
-              window.history.replaceState({}, '', `/${params}`);
+              router.push(`/catalog?${params.toString()}`, { scroll: false });
             }}
             className="w-full sm:w-72 rounded-lg border border-slate-300 px-4 py-2 text-sm focus:border-indigo-500 focus:ring-indigo-500"
           >
