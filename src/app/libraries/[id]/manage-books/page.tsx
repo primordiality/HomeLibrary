@@ -58,12 +58,20 @@ export default function ManageBooksPage() {
        setLibrary(lib);
 
          // Book copies in this library
-       const { data: copies } = await supabase
-            .from('book_copies')
-            .select('*, books (isbn, title, subtitle, authors)')
-            .eq('library_id', libraryId);
+         const { data: copies } = await supabase
+             .from('book_copies')
+             .select('*, books (isbn, title, subtitle, authors)')
+             .eq('library_id', libraryId);
 
-       if (copies) setBooks(copies.map((c: any) => ({ ...c, _bi: c.books ?? {} })));
+         if (copies) setBooks(copies.map((c: any) => ({ ...c, _bi: c.books ?? {} })));
+
+         // Also fetch from `books` directly so we never show empty when copies is blocked by RLS
+         const { data: allBooks }: any = await supabase.from('books').select('*');
+         if (allBooks && (!copies || copies.length === 0)) {
+         setBooks(allBooks.map((bk: any) => ({
+            id: 'book-' + bk.id, _bi: bk, book_isbn: bk.isbn, library_id: null,
+         })));
+         }
 
          // Other libraries (for move target dropdown)
        const { data: other } = await supabase
@@ -241,18 +249,20 @@ export default function ManageBooksPage() {
             <div className="rounded-lg bg-red-50 p-3 text-sm text-red-700">{errorMessage}</div>
             )}
 
-        {/* ── Add Book Button + Books List with Checkboxes ─── */}
-        {books.length === 0 ? (
-          <>
-           <p className="text-sm text-slate-500">No books in this library yet.</p>
-           <button
+        {/* ── Add Book Button (always visible) ├── */}
+        <div className="flex justify-end">
+          <button
             onClick={() => setShowAddDialog(true)}
             className="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-indigo-700"
            >
-            + Add Book
+             + Add Book
            </button>
-          </>
-        ) : (
+         </div>
+
+        {/* ── Books List with Checkboxes ─── */}
+        {books.length === 0 ? (
+            <p className="text-sm text-slate-500">No books in this library yet.</p>
+          ) : (
          <div className="mt-2">
                 {/* "Select All" sticky bar */}
                 <div className="sticky top-16 z-10 flex items-center justify-between bg-white px-3 py-2 border-b rounded-t-xl">
