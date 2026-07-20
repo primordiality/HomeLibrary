@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback } from "react";
 import { supabase } from "@/lib/supabase/client";
+import { useAuth } from "@/contexts/AuthContext";
 import type { Profile } from "@/types/db";
 
 type UserRow = Profile & { status?: string | null };
@@ -17,6 +18,9 @@ export default function AdminUsers() {
   const [skipConfirmation, setSkipConfirmation] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [toast, setToast] = useState<string | null>(null);
+  const { user } = useAuth();
+  const selfId = user?.id;
+  const adminCount = users.filter(u => u.role === "system_admin").length;
 
   const loadUsers = useCallback(async () => {
     try {
@@ -213,7 +217,7 @@ export default function AdminUsers() {
                             Approve
                           </button>
                         )}
-                        {isActive && (
+                        {isActive && u.id !== selfId && adminCount > 1 && (
                           <button
                             onClick={() => handleAction(u.id, u.name || "User", "suspend")}
                             className="text-xs font-medium text-red-700 bg-red-50 hover:bg-red-100 px-2.5 py-1 rounded border border-red-200 transition"
@@ -221,13 +225,19 @@ export default function AdminUsers() {
                             Suspend
                           </button>
                         )}
-                        {isSuspended && (
+                        {isActive && (u.id === selfId || adminCount <= 1) && (
+                          <span className="text-xs font-medium text-slate-400" title={u.id === selfId ? "You cannot suspend yourself" : "Need at least one active system admin"}>—</span>
+                        )}
+                        {isSuspended && u.id !== selfId && (
                           <button
                             onClick={() => handleAction(u.id, u.name || "User", "approve")}
                             className="text-xs font-medium text-amber-700 bg-amber-50 hover:bg-amber-100 px-2.5 py-1 rounded border border-amber-200 transition"
                           >
                             Re-activate
                           </button>
+                        )}
+                        {isSuspended && u.id === selfId && (
+                          <span className="text-xs font-medium text-slate-400" title="Account suspended — contact another admin">—</span>
                         )}
                       </td>
                     </tr>
