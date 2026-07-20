@@ -13,7 +13,7 @@ const CONDITION_COLORS: Record<string, string> = {
   damaged: 'bg-red-100 text-red-800',
 };
 
-export default function BookDetailPage({ params }: { params: { isbn: string } }) {
+export default function BookDetailPage({ params }: { params: { bookId: string } }) {
   const [book, setBook] = useState<Book | null>(null);
   const [loading, setLoading] = useState(true);
   const [showAddCopyForm, setShowAddCopyForm] = useState(false);
@@ -27,7 +27,7 @@ export default function BookDetailPage({ params }: { params: { isbn: string } })
        const { data } = await supabase
          .from('books')
          .select('*')
-         .eq('isbn', params.isbn)
+         .eq('id', params.bookId)
          .single();
       if (data) setBook(data as Book);
      } catch {
@@ -38,7 +38,7 @@ export default function BookDetailPage({ params }: { params: { isbn: string } })
    }
 
   async function handleBookUpdate(field: string, value: string | null): Promise<void> {
-    const { error } = await supabase.from('books').update({ [field]: value }).eq('isbn', params.isbn);
+    const { error } = await supabase.from('books').update({ [field]: value }).eq('id', params.bookId);
 
     if (!error) {
       setBook((prev) => (prev ? { ...prev, [field]: value } : null));
@@ -49,20 +49,20 @@ export default function BookDetailPage({ params }: { params: { isbn: string } })
    }
 
   async function handleUploadCover(file: File): Promise<void> {
-    const fileName = `book-covers/${params.isbn}-${Date.now()}.${file.name.split('.').pop()}`;
+    const fileName = `book-covers/${params.bookId}-${Date.now()}.${file.name.split('.').pop()}`;
     const { error } = await supabase.storage.from('library-images').upload(fileName, file);
     
     if (error) { alert(`Upload failed: ${error.message}`); return; }
 
     const { data } = await supabase.storage.from('library-images').getPublicUrl(fileName);
 
-    await supabase.from('books').update({ cover_url: data?.publicUrl }).eq('isbn', params.isbn);
+    await supabase.from('books').update({ cover_url: data?.publicUrl }).eq('id', params.bookId);
     setBook((prev) => (prev ? { ...prev, cover_url: data?.publicUrl } : null));
     alert('Cover image uploaded.');
    }
 
   async function handleUploadPersonalPhoto(file: File): Promise<void> {
-    const fileName = `book-personal/${params.isbn}/${Date.now()}.${file.name.split('.').pop()}`;
+    const fileName = `book-personal/${params.bookId}/${Date.now()}.${file.name.split('.').pop()}`;
     const { error } = await supabase.storage.from('library-images').upload(fileName, file);
     
     if (error) alert(`Upload failed: ${error.message}`);

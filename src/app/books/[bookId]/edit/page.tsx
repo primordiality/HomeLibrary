@@ -5,19 +5,14 @@ import Link from 'next/link';
 import Image from 'next/image';
 import { useRouter, useParams } from 'next/navigation';
 import { supabase } from '@/lib/supabase/client';
-import { fetchBookByIsbn, cleanIsbn } from '@/lib/openlibrary';
+import { fetchBookByIsbn } from '@/lib/openlibrary';
 
 export default function EditBookPage() {
-  const params = useParams<{ isbn: string }>();
+  const params = useParams<{ bookId: string }>();
   const router = useRouter();
-  const raw = params?.isbn ?? '';
+  const bookId = params?.bookId ?? '';
 
-  // Detect surrogate fallback ID (prefixed with '-' for no-ISBN books)
-  const isFallback = raw.startsWith('-');
-  // Strip prefix: '-book-' (from manage-books, 6 chars) or '-' (from catalog, 1 char)
-  const lookupId = isFallback ? (raw.startsWith('-book-') ? raw.slice(6) : raw.slice(1)) : raw;
-
-  const [isbn, setIsbn] = useState(raw);
+  const [isbn, setIsbn] = useState('');
   const [title, setTitle] = useState('');
   const [subtitle, setSubtitle] = useState('');
   const [authors, setAuthors] = useState('');
@@ -35,20 +30,36 @@ export default function EditBookPage() {
   const [okMsg, setOkMsg] = useState<string | null>(null);
   const [fetchingCover, setFetchingCover] = useState(false);
   const [showDelModal, setShowDelModal] = useState(false);
-  // Track whether book was loaded via fallback copy ID (no ISBN)
-  const [fallbackCopy, setFallbackCopy] = useState<any>(null);
 
   useEffect(() => {
-    if (!raw) return router.push('/books');
-    if (isFallback) { loadAllFallback(lookupId); } else { loadAll(raw); }
-  }, [raw]);
+    if (!bookId) return router.push('/books');
+    loadAll();
+  }, [bookId]);
 
-  async function loadAll(isbn: string) {
-    setLoading(true); setErrorStr(null);
-    const { data: book, error: bErr } = await supabase.from('books').select('*').eq('isbn', isbn).limit(1).single();
-    if (!book && !bErr && raw !== 'missing') { setErrorStr('Book not found'); setLoading(false); return; }
-    const { data: copRes, error: cErr }: any = await supabase.from('book_copies').select('*').eq('book_isbn', isbn);
+  async function loadAll() {
+    setLoading(true);
+    setErrorStr(null);
+
+    const { data: book, error: bErr } = await supabase
+      .from('books')
+      .select('*')
+      .eq('id', bookId)
+      .limit(1)
+      .single();
+
+    if (!book && !bErr) {
+      setErrorStr('Book not found');
+      setLoading(false);
+      return;
+    }
+
+    const { data: copRes, error: cErr }: any = await supabase
+      .from('book_copies')
+      .select('*')
+      .eq('book_id', bookId);
+
     if (cErr) console.error('book_copies query failed:', cErr);
+
     const ids = copRes?.map((c: any) => c.id!) || [];
     let locMap: Record<string, string> = {};
     if (ids.length > 0) {
@@ -64,111 +75,100 @@ export default function EditBookPage() {
       if (ptnArr.length > 0) { const { data: ps }: any = await supabase.from('profiles').select('*').in('id', ptnArr); if (ps) for (const p of ps) ptMap[p.id] = p.name || 'Unnamed'; }
       ids.forEach((cid: string, i: number) => { const c2 = copRes![i]; if (!c2) return; const blist = (brs as any[] || []).filter((b: any) => b.copy_id === cid).map((b: any) => ({ ...b, patron_name: ptMap[b.patron_user_id] || null })); Object.assign(c2, { location_name: locMap[c2.location_id || ''] || '', copy_borrows: blist }); });
     }
-    let pats: any[] = []; try { const { data }: any = await supabase.from('profiles').select('*').order('name'); if (data) pats = data; } catch {}
-    setIsbn(book.isbn || ''); setTitle((book.title as string) || ''); setSubtitle((book.subtitle as string) || '');
+
+    let pats: any[] = [];
+    try { const { data }: any = await supabase.from('profiles').select('*').order('name'); if (data) pats = data; } catch {}
+
+    setIsbn(book.isbn || '');
+    setTitle((book.title as string) || '');
+    setSubtitle((book.subtitle as string) || '');
     const al = book.authors; if (Array.isArray(al)) setAuthors(al.join(', '));
-    setPublisher((book.publisher as string) || ''); setPublishYear((book.publish_date as string) || '');
-    setPagesStr(String(book.pages ?? '')); setNotes((book.notes as string) || ''); setCoverUrl(book.cover_url || '');
-    if (copRes) setCopies(copRes); if (pats.length > 0) setPatrons(pats); setLoading(false);
-   }
+    setPublisher((book.publisher as string) || '');
+    setPublishYear((book.publish_date as string) || '');
+    setPagesStr(String(book.pages ?? ''));
+    setNotes((book.notes as string) || '');
+    setCoverUrl(book.cover_url || '');
+    if (copRes) setCopies(copRes);
+    if (pats.length > 0) setPatrons(pats);
+    setLoading(false);
+  }
 
-   async function loadAllFallback(copyId: string) {
-     setLoading(true); setErrorStr(null);
-
-       // Strategy 1: Try books table first (most reliable for no-ISBN records)
-      const bkRes: any = await supabase.from('books').select('*').eq('id', copyId).limit(1).single();
-      const { data: bookData, error: bkErr } = bkRes;
-      
-      if (bookData && !bkErr) {
-        // Found in books table — this is a no-ISBN book
-        setFallbackCopy(bookData);
-        setIsbn('');
-        loadAndSaveTitleFromCopy(bookData, '');
-        return;
-      }
-
-       // Strategy 2: Try book_copies (for ISBN-linked physical copies)
-      const copRes: any = await supabase.from('book_copies').select('*').eq('id', copyId).single();
-      const { data: copyData, error: copErr } = copRes;
-      
-       if (copyData && !copErr) {
-        // Found in book_copies — load normally
-        setFallbackCopy(copyData);
-         const copIsbn = copyData.book_isbn ?? '';
-        setIsbn(copIsbn);
-        loadAndSaveTitleFromCopy(copyData, copIsbn);
-        return;
-      }
-
-       // Neither source could find the record — show a clear message
-      const msg = bkErr?.message || copErr?.message || 'Record not found';
-      setErrorStr(`Edit failed: ${msg}. Try editing via Manage Books instead.`);
-     setLoading(false);
-    }
-
-   async function loadAndSaveTitleFromCopy(copyData: any, _copIsbn: string) {
-      // If the copy has no ISBN, try to pull metadata from the books table via another field.
-       // For now, we still allow editing title/authors directly — save later writes into books table
-       // but won't update a books-row (no isbn) unless the user assigns one.
-const t1x = copyData.title ?? ((copyData._bi as any)?.title as string) ?? 'Unknown Book';
-     setTitle(t1x);
-     setSubtitle((copyData.subtitle || '') as string);
-     const al: any = copyData.authors; if (Array.isArray(al)) setAuthors(al.join(', '));
-     setPublisher((copyData.publisher ?? '') as string);
-     setPublishYear((copyData.publish_date ?? '') as string);
-     setPagesStr(String(copyData.pages ?? ''));
-     setNotes((copyData.notes ?? '') as string);
-     setCoverUrl((copyData.cover_url ?? '') as string);
-     // For copies with no ISBN, the single copy IS the "copies" list; for those where _bi may carry fields:
-     const copiesList = [ { ...copyData, book_isbn_copy_id: true } ];
-     setCopies(copiesList);
-      let pats: any[] = []; try { const { data }: any = await supabase.from('profiles').select('*').order('name'); if (data) pats = data; } catch {}
-     if (pats.length > 0) setPatrons(pats);
-     setLoading(false);
-   }
-
-  async function fetchCover() { const c = cleanIsbn(isbn); if (c.length !== 10 && c.length !== 13) return; setFetchingCover(true); try { const res = await fetchBookByIsbn(c); if (res?.coverUrl) { setCoverUrl(res.coverUrl); setOkMsg('Cover loaded'); } else setErrorStr('No cover found'); } catch (e: any) { setErrorStr(e.message || 'Failed'); } finally { setFetchingCover(false); } }
+  async function fetchCover() {
+    if (isbn.length !== 10 && isbn.length !== 13) return;
+    setFetchingCover(true);
+    try {
+      const res = await fetchBookByIsbn(isbn);
+      if (res?.coverUrl) { setCoverUrl(res.coverUrl); setOkMsg('Cover loaded'); }
+      else setErrorStr('No cover found');
+    } catch (e: any) { setErrorStr(e.message || 'Failed'); }
+    finally { setFetchingCover(false); }
+  }
 
   async function handleSave() {
     if (!title.trim()) return setErrorStr('Title required');
-    const sdata: Record<string, unknown> = { title: title.trim(), subtitle: subtitle.trim() || null, authors: authors.split(',').map((s: string) => s.trim()).filter(Boolean), publisher: publisher.trim() || null, publish_date: publishYear.trim() || null, pages: parseInt(pagesStr, 10) || null, notes: notes.trim() || null };
-    const nIsbn = cleanIsbn(isbn);
-    sdata.isbn = nIsbn || null;
-    setSaving(true); setErrorStr(null); setOkMsg(null);
+    const sdata: Record<string, unknown> = {
+      title: title.trim(),
+      subtitle: subtitle.trim() || null,
+      authors: authors.split(',').map((s: string) => s.trim()).filter(Boolean),
+      publisher: publisher.trim() || null,
+      publish_date: publishYear.trim() || null,
+      pages: parseInt(pagesStr, 10) || null,
+      notes: notes.trim() || null,
+      isbn: isbn.trim() || null,
+    };
+    setSaving(true);
+    setErrorStr(null);
+    setOkMsg(null);
     try {
-      if (isFallback) {
-        // No-ISBN book: save to books table using lookupId (stable from URL, not state)
-        const result = await supabase.from('books').update(sdata as Record<string, any>).eq('id', lookupId);
-        if (result.error) throw new Error(result.error.message || 'Failed to save book');
-        if (nIsbn) {
-          // User assigned an ISBN — upsert as a new books row
-          const sdataWithIsbn = { ...sdata, isbn: nIsbn };
-          await supabase.from('books').upsert(sdataWithIsbn, { onConflict: 'isbn' });
-        }
-      } else {
-        if (nIsbn && raw !== nIsbn) {
-          await supabase.from('books').upsert(sdata as Record<string, any>, { onConflict: 'isbn' });
-          await supabase.from('books').delete().eq('isbn', raw);
-          await supabase.from('book_copies').update({ book_isbn: nIsbn || null }).eq('book_isbn', raw);
-        } else {
-          const r = await supabase.from('books').update(sdata).eq('isbn', raw);
-          if (r.error) throw new Error(r.error.message);
-        }
-      }
-      setOkMsg('Book saved!'); router.refresh();
-    } catch (e: any) { setErrorStr(e.message || 'Save failed'); } finally { setSaving(false); }
+      const { error } = await supabase.from('books').update(sdata as Record<string, any>).eq('id', bookId);
+      if (error) throw new Error(error.message || 'Failed to save book');
+      setOkMsg('Book saved!');
+      router.refresh();
+    } catch (e: any) { setErrorStr(e.message || 'Save failed'); }
+    finally { setSaving(false); }
   }
 
-  async function handleDelete() { setDelting(true); try { if (isFallback) { await supabase.from('book_copies').delete().eq('id', lookupId); } else { const { data: brs }: any = await supabase.from('book_copies').select('id').eq('book_isbn', raw); if (brs) { const cIds = brs.map((c: any) => c.id!); if (cIds.length > 0) await supabase.from('borrows').delete().in('copy_id', cIds); } await supabase.from('book_copies').delete().eq('book_isbn', raw); } await supabase.from('books').delete().eq('isbn', isFallback ? lookupId : raw).or(`title.eq.${encodeURIComponent(title || raw)}`); setOkMsg('Deleted'); router.push('/catalog'); } catch (e: any) { setErrorStr(e.message || 'Delete failed'); } finally { setDelting(false); setShowDelModal(false); } }
+  async function handleDelete() {
+    setDelting(true);
+    try {
+      const { data: copyData } = await supabase.from('book_copies').select('id').eq('book_id', bookId);
+      const copyIds = copyData?.map((c: any) => c.id) || [];
+      if (copyIds.length > 0) {
+        await supabase.from('borrows').delete().in('copy_id', copyIds);
+      }
+      await supabase.from('book_copies').delete().eq('book_id', bookId);
+      await supabase.from('books').delete().eq('id', bookId);
+      setOkMsg('Deleted');
+      router.push('/catalog');
+    } catch (e: any) { setErrorStr(e.message || 'Delete failed'); }
+    finally { setDelting(false); setShowDelModal(false); }
+  }
 
-  async function handleReturn(borrowId: string) { try { await supabase.from('borrows').update({ return_date: new Date().toISOString() }).eq('id', borrowId); setOkMsg('Returned'); router.refresh(); } catch (e: any) { setErrorStr(e.message || 'Failed'); } }
+  async function handleReturn(borrowId: string) {
+    try {
+      await supabase.from('borrows').update({ return_date: new Date().toISOString() }).eq('id', borrowId);
+      setOkMsg('Returned');
+      router.refresh();
+    } catch (e: any) { setErrorStr(e.message || 'Failed'); }
+  }
 
-  async function handleCheckout(cpyId: string, ptnId: string | null) { if (!ptnId?.trim()) return; try { const { data: active }: any = await supabase.from('borrows').select('*').eq('copy_id', cpyId).is('return_date', null).limit(1); if (active && active.length > 0) { await supabase.from('borrows').update({ patron_user_id: ptnId }).eq('id', active[0].id); } else { await supabase.from('borrows').insert({ copy_id: cpyId, patron_user_id: ptnId, checkout_date: new Date().toISOString() }); } setOkMsg('Checked out!'); router.refresh(); } catch (e: any) { setErrorStr(e.message || 'Checkout failed'); } }
+  async function handleCheckout(cpyId: string, ptnId: string | null) {
+    if (!ptnId?.trim()) return;
+    try {
+      const { data: active }: any = await supabase.from('borrows').select('*').eq('copy_id', cpyId).is('return_date', null).limit(1);
+      if (active && active.length > 0) {
+        await supabase.from('borrows').update({ patron_user_id: ptnId }).eq('id', active[0].id);
+      } else {
+        await supabase.from('borrows').insert({ copy_id: cpyId, patron_user_id: ptnId, checkout_date: new Date().toISOString() });
+      }
+      setOkMsg('Checked out!');
+      router.refresh();
+    } catch (e: any) { setErrorStr(e.message || 'Checkout failed'); }
+  }
 
   if (loading) return <p className="text-sm text-slate-500 p-8">Loading...</p>;
-   // For fallback (no-ISBN) books, copies will be populated by loadAllFallback
-   if (!copies.length && raw && !isFallback) return (<div className="mt-6 space-y-4 text-center py-12"><h1 className="text-xl font-bold text-slate-700">Not Found</h1><p className="text-sm text-slate-500">No book with this ISBN.</p></div>);
-   if (!copies.length && raw && isFallback) return (<div className="mt-6 space-y-4 text-center py-12"><h1 className="text-xl font-bold text-slate-700">Not Found</h1><p className="text-sm text-slate-500">No copy found with this ID.</p></div>);
+  if (!copies.length && !bookId) return (<div className="mt-6 space-y-4 text-center py-12"><h1 className="text-xl font-bold text-slate-700">Not Found</h1><p className="text-sm text-slate-500">No book with this ID.</p></div>);
+  if (!copies.length && bookId) return (<div className="mt-6 space-y-4 text-center py-12"><h1 className="text-xl font-bold text-slate-700">Not Found</h1><p className="text-sm text-slate-500">No book found with this ID.</p></div>);
 
   return (
     <>
