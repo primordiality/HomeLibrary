@@ -41,7 +41,8 @@ export interface Location {
 }
 
 export interface Book {
-  isbn: string                  // PRIMARY KEY — e.g. "978-0441172719"
+  isbn: string                  // nullable ISBN field (not unique) — e.g. "978-0441172719"
+  ol_key?: string | null       // Open Library key (e.g. "/books/OL12345M")
   title?: string | null
   subtitle?: string | null     // e.g., "The Second Book of Isaac Asimov"
   authors?: string[] | null    // ["Asimov, Isaac", "Silverberg, Robert"]
@@ -56,7 +57,7 @@ export interface Book {
 
 export interface BookCopy {
   id: string                    // uuid — the physical copy ID
-  book_isbn: string             // foreign key → books.isbn
+  book_id: string               // foreign key → books.id
   library_id: string            // belongs to which library
   location_id?: string | null   // nullable = NOT YET SHELVED
   barcode?: string | null       // sticker ISBN (may differ from catalog ISBN)
@@ -82,7 +83,7 @@ export interface BorrowRecord {
 export interface HoldRequest {
   id: string                    // uuid
   patron_user_id: string        // who placed the hold
-  book_isbn: string             // which ISBN to wait for
+  book_id: string               // which book.id to wait for
   library_id: string            // which library to check  
   status: 'waiting' | 'accepted' | 'cancelled'
   created_at: string            // ISO datetime  

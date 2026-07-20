@@ -8,7 +8,7 @@ export const BOOK_DEFAULT: BookData = {
 };
 
 export const COPY_DEFAULT: CopyData = {
-  copy_id: '', book_isbn: '', library_id: '', location: '', barcode: '',
+  copy_id: '', book_id: '', library_id: '', location: '', barcode: '',
   condition: 'new' as 'new'|'good'|'fair'|'poor'|'damaged',
   purchase_price: null, acquired_date: null, notes: '', copyId: null,
 };

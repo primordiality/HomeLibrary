@@ -65,32 +65,24 @@ export default function ManageBooksPage() {
 
          if (cErr) console.error('book_copies query failed:', cErr);
 
-         // Fetch book metadata for copies that have an ISBN
-         const copiesWithIsbn = (copies || []).filter((c: any) => c.book_isbn);
-         const copiesWithoutIsbn = (copies || []).filter((c: any) => !c.book_isbn);
-
+         // Fetch book metadata for all copies via book_id
+         const bookIds = (copies || []).map((c: any) => c.book_id);
          let bookMap: Record<string, any> = {};
-         if (copiesWithIsbn.length > 0) {
-           const isbnList = copiesWithIsbn.map((c: any) => c.book_isbn);
+         if (bookIds.length > 0) {
            const { data: booksData } = await supabase
              .from('books')
-             .select('isbn, title, subtitle, authors')
-             .in('isbn', isbnList);
+             .select('id, isbn, title, subtitle, authors')
+             .in('id', bookIds);
            if (booksData) {
-             booksData.forEach((b: any) => { bookMap[b.isbn] = b; });
+             booksData.forEach((b: any) => { bookMap[b.id] = b; });
            }
          }
 
          // Merge copy data with book metadata
-         const merged = copiesWithIsbn.map((c: any) => ({
+         const allBooks = (copies || []).map((c: any) => ({
            ...c,
-           _bi: bookMap[c.book_isbn] || {},
+           _bi: bookMap[c.book_id] || {},
          }));
-         // Add NULL-isbn copies with empty metadata
-         const allBooks = [
-           ...merged,
-           ...copiesWithoutIsbn.map((c: any) => ({ ...c, _bi: {} })),
-         ];
 
          setBooks(allBooks);
 
@@ -329,15 +321,11 @@ export default function ManageBooksPage() {
                           {!isEditing && (<>
                            <div className="flex-1 min-w-0">
                              <p className="text-sm font-medium text-slate-900 truncate">{book._bi?.title ?? 'Unknown Book'}</p>
-                             <p className="text-xs text-slate-500">{book.book_isbn ?? '-'}</p>
+                             <p className="text-xs text-slate-500">{book._bi?.isbn ?? '-'}</p>
                            </div>
 
                            <div className="flex items-center gap-2 flex-shrink-0">
-                               {book.book_isbn ? (
-                                 <Link href={`/books/${encodeURIComponent(book.book_isbn)}/edit`} className="rounded-md border border-indigo-300 px-2.5 py-1 text-xs font-medium text-indigo-600 hover:bg-indigo-50 whitespace-nowrap">Edit</Link>
-                               ) : (
-                                 <Link href={`/books/-${book.id}/edit`} className="rounded-md border border-indigo-300 px-2.5 py-1 text-xs font-medium text-indigo-600 hover:bg-indigo-50 whitespace-nowrap">Edit</Link>
-                               )}
+                               <Link href={`/books/${encodeURIComponent(book.book_id)}/edit`} className="rounded-md border border-indigo-300 px-2.5 py-1 text-xs font-medium text-indigo-600 hover:bg-indigo-50 whitespace-nowrap">Edit</Link>
 
                              <button
                               onClick={() => startEdit(book.id)}
@@ -400,11 +388,9 @@ export default function ManageBooksPage() {
                              </>)}
                        </div>
 
-                      {isEditing && (book.book_isbn ? (
-                         <Link href={`/books/${encodeURIComponent(book.book_isbn)}/edit`} className="block text-center text-xs text-indigo-600 hover:text-indigo-800 py-1">Also edit book metadata</Link>
-                       ) : (
-                         <Link href={`/books/-${book.id}/edit`} className="block text-center text-xs text-indigo-600 hover:text-indigo-800 py-1">Also edit book metadata</Link>
-                       ))}
+                      {isEditing && (
+                         <Link href={`/books/${encodeURIComponent(book.book_id)}/edit`} className="block text-center text-xs text-indigo-600 hover:text-indigo-800 py-1">Also edit book metadata</Link>
+                       )}
                       </div>
                       );
                       })}
