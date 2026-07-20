@@ -209,52 +209,74 @@ const AddBookDialogComponent = forwardRef<
 
   async function handleSubmit(): Promise<void> {
     setError(null);
+    setLoading(true);
 
     // Title is required at minimum
     if (!form.title?.trim()) {
       setError('A book title is required.');
       setStep('review');
+      setLoading(false);
       return;
     }
 
-     const cleaned = cleanIsbn(form.isbn);
-     const hasISBN = cleaned.length > 0;
+    const cleaned = cleanIsbn(form.isbn);
+    const hasISBN = cleaned.length > 0;
 
-     try {
-        // Build base record; only include isbn when we have one (omit otherwise to avoid NOT NULL violations)
-      const bookBase: Record<string, unknown> = {
-           title: form.title.trim(),
-           subtitle: form.subtitle?.trim() || null,
-           authors: form.authors.trim()
-               ? [form.authors.split(',')[0]!.trim()]
-                : [],
-           publisher: form.publisher?.trim() || null,
-           publish_date: form.publishDate?.trim() || null,
-           pages: parseInt(form.pages, 10) || null,
-           cover_url: form.coverUrl?.trim() || null,
-          };
+    try {
+      // Build book metadata (title always required; isbn only when present)
+      const bookData: Record<string, unknown> = {
+        title: form.title.trim(),
+        subtitle: form.subtitle?.trim() || null,
+        authors: form.authors.trim()
+          ? [form.authors.split(',')[0]!.trim()]
+          : [],
+        publisher: form.publisher?.trim() || null,
+        publish_date: form.publishDate?.trim() || null,
+        pages: parseInt(form.pages, 10) || null,
+        cover_url: form.coverUrl?.trim() || null,
+      };
+      if (hasISBN) {
+        (bookData as Record<string, unknown>).isbn = cleaned;
+      }
 
-        // isbn present or empty → upsert (isbn field exists always now, since deploy_fix runs); no ISBN will be '' which DB accepts
-       let saveResult!: { error: unknown };
-      const bookData = hasISBN ? { ...bookBase, isbn: cleaned } : { ...bookBase, isbn: null };
+      let bookId: string;
 
-         if (hasISBN) {
-            saveResult = await supabase.from('books').upsert(bookData as Record<string, string | number[]>, { onConflict: 'isbn' });
-             } else {
-           // Null ISBN — omit isbn field entirely to avoid 23502 NOT NULL violation
-           delete (bookData as Record<string, unknown>).isbn;
-            saveResult = await supabase.from('books').insert(bookData);
-             }
+      if (hasISBN) {
+        // Check if a book with this ISBN already exists
+        const { data: existing } = await supabase
+          .from('books')
+          .select('id')
+          .eq('isbn', cleaned)
+          .maybeSingle();
 
-       if (saveResult?.error) {
-         console.error('Book insert/upsert failed:', saveResult.error);
-        throw saveResult.error;
-          }
+        if (existing?.id) {
+          // Book exists — create a new copy pointing to the existing book
+          bookId = existing.id;
+        } else {
+          // No existing book — create new master record
+          const { data: newBook, error: insertErr } = await supabase
+            .from('books')
+            .insert(bookData)
+            .select('id')
+            .single();
+          if (insertErr) throw insertErr;
+          bookId = newBook!.id;
+        }
+      } else {
+        // No ISBN — always create a new master record
+        const { data: newBook, error: insertErr } = await supabase
+          .from('books')
+          .insert(bookData)
+          .select('id')
+          .single();
+        if (insertErr) throw insertErr;
+        bookId = newBook!.id;
+      }
 
-          // Insert book_copies for every library (ISBN present or not)
-        if (selectedLibraryId) {
-          await supabase.from('book_copies').insert({
-            book_isbn: hasISBN ? cleaned : null,
+      // Insert book_copies row (with book_id instead of book_isbn)
+      if (selectedLibraryId) {
+        await supabase.from('book_copies').insert({
+          book_id: bookId,
           library_id: selectedLibraryId,
           location_id: null,
           barcode: null,
@@ -275,14 +297,16 @@ const AddBookDialogComponent = forwardRef<
       } else if (typeof err === 'object' && (err as Record<string, unknown>).code) {
         const c = err as Record<string, string>;
         if (c.detail?.trim()) detail = c.detail;
-        else if (c.hint?.trim())  detail = c.hint;
-        else                          detail += ` (${c.code ?? ''})`;
+        else if (c.hint?.trim()) detail = c.hint;
+        else detail += ` (${c.code ?? ''})`;
       } else if (typeof err === 'object' &&
                  (err as Record<string, unknown>).error_description) {
         detail = (err as Record<string, unknown>).error_description as string;
       }
       setError(detail);
       setStep('review');
+    } finally {
+      setLoading(false);
     }
   }
 
