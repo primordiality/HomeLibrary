@@ -8,7 +8,8 @@ export default function PatronsPage() {
   const [patrons, setPatrons] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
-  const [name, setName] = useState('');
+  const [firstName, setFirstName] = useState('');
+  const [lastName, setLastName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [sendInvite, setSendInvite] = useState(false);
@@ -93,7 +94,8 @@ export default function PatronsPage() {
   }
 
   function resetForm() {
-    setName('');
+    setFirstName('');
+    setLastName('');
     setEmail('');
     setPassword('');
     setSendInvite(false);
@@ -105,10 +107,11 @@ export default function PatronsPage() {
     setErrorMessage(null);
     setOkMessage(null);
 
-    const nameTrimmed = name.trim();
+    const firstNameTrimmed = firstName.trim();
+    const lastNameTrimmed = lastName.trim();
     const emailTrimmed = email.trim();
-    if (!nameTrimmed) {
-      setErrorMessage('Name is required.');
+    if (!firstNameTrimmed && !lastNameTrimmed) {
+      setErrorMessage('First name or last name is required.');
       return;
     }
     if (!emailTrimmed) {
@@ -128,7 +131,9 @@ export default function PatronsPage() {
     setCreating(true);
 
     try {
-      const userMetadata = { display_name: nameTrimmed, role: 'patron' };
+      // Build full name for display_name in user metadata
+      const fullName = `${firstNameTrimmed} ${lastNameTrimmed}`.trim() || firstNameTrimmed || lastNameTrimmed;
+      const userMetadata = { display_name: fullName, role: 'patron' };
 
       if (sendInvite) {
         // ── Invite via email (uses Edge Function with service role key) ──
@@ -165,7 +170,12 @@ export default function PatronsPage() {
         if (existingProfile) {
           await supabase
             .from('profiles')
-            .update({ role: 'patron', name: nameTrimmed })
+            .update({
+              role: 'patron',
+              name: fullName,
+              first_name: firstNameTrimmed || null,
+              last_name: lastNameTrimmed || null,
+            })
             .eq('id', existingProfile.id);
         } else {
           // Try to find user by email in auth.users
@@ -174,12 +184,17 @@ export default function PatronsPage() {
           if (authUser) {
             await supabase
               .from('profiles')
-              .update({ role: 'patron', name: nameTrimmed })
+              .update({
+                role: 'patron',
+                name: fullName,
+                first_name: firstNameTrimmed || null,
+                last_name: lastNameTrimmed || null,
+              })
               .eq('id', authUser.id);
           }
         }
 
-        setOkMessage(`Invite sent to "${nameTrimmed}" (${emailTrimmed}).`);
+        setOkMessage(`Invite sent to "${fullName}" (${emailTrimmed}).`);
       } else {
         // ── Manual password: create via auth (uses anon key) ──
         const { data: authData, error: authErr } = await supabase.auth.signUp({
@@ -200,19 +215,25 @@ export default function PatronsPage() {
 
         if (authData?.user) {
           // The trigger creates the profile with default role
-          // Update to patron and set name
+          // Update to patron and set name/first_name/last_name
           await supabase
             .from('profiles')
-            .update({ role: 'patron', name: nameTrimmed })
+            .update({
+              role: 'patron',
+              name: fullName,
+              first_name: firstNameTrimmed || null,
+              last_name: lastNameTrimmed || null,
+            })
             .eq('id', authData.user.id);
         }
 
-        setOkMessage(`Patron "${nameTrimmed}" created successfully.`);
+        setOkMessage(`Patron "${fullName}" created successfully.`);
       }
 
       resetForm();
       await loadPatrons();
       await loadStats();
+      setOkMessage(sendInvite ? `Invite sent to "${fullName}" (${emailTrimmed}).` : `Patron "${fullName}" created successfully.`);
       setTimeout(() => setOkMessage(null), 4000);
     } catch (err: any) {
       console.error('Failed to create patron:', err);
@@ -362,20 +383,34 @@ export default function PatronsPage() {
 
             {/* Modal body */}
             <form onSubmit={handleCreate} className="px-6 pb-6 pt-4 space-y-4">
-              <div>
-                <label htmlFor="patron-name" className="block text-sm font-medium text-slate-700 mb-1">
-                  Name <span className="text-red-500">*</span>
-                </label>
-                <input
-                  id="patron-name"
-                  type="text"
-                  value={name}
-                  onChange={e => setName(e.target.value)}
-                  className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-indigo-500 focus:ring-indigo-500"
-                  placeholder="Full name"
-                  autoFocus
-                  required
-                />
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label htmlFor="patron-first" className="block text-sm font-medium text-slate-700 mb-1">
+                    First Name <span className="text-red-500">*</span>
+                  </label>
+                  <input
+                    id="patron-first"
+                    type="text"
+                    value={firstName}
+                    onChange={e => setFirstName(e.target.value)}
+                    className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-indigo-500 focus:ring-indigo-500"
+                    placeholder="First name"
+                    autoFocus
+                  />
+                </div>
+                <div>
+                  <label htmlFor="patron-last" className="block text-sm font-medium text-slate-700 mb-1">
+                    Last Name
+                  </label>
+                  <input
+                    id="patron-last"
+                    type="text"
+                    value={lastName}
+                    onChange={e => setLastName(e.target.value)}
+                    className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-indigo-500 focus:ring-indigo-500"
+                    placeholder="Last name"
+                  />
+                </div>
               </div>
 
               <div>
