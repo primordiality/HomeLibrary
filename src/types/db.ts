@@ -74,6 +74,7 @@ export interface BorrowRecord {
   patron_user_id: string        // profiles.id who borrowed
   copy_id: string               // book_copies.id checked out
   checkout_date: string         // date when it left
+  due_date?: string | null      // date when loan is due
   nudge_by_date?: string | null // soft reminder target — not enforced by DB
   return_date?: string | null   // when returned (set on check-in)
   created_at: string            // ISO datetime

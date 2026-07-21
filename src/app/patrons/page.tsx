@@ -8,11 +8,13 @@ export default function PatronsPage() {
   const [patrons, setPatrons] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
-  const [firstName, setFirstName] = useState('');
-  const [lastName, setLastName] = useState('');
+  const [name, setName] = useState('');
   const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [sendInvite, setSendInvite] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [okMessage, setOkMessage] = useState<string | null>(null);
+  const [creating, setCreating] = useState(false);
 
   // Stats
   const [totalPatrons, setTotalPatrons] = useState(0);
@@ -91,9 +93,10 @@ export default function PatronsPage() {
   }
 
   function resetForm() {
-    setFirstName('');
-    setLastName('');
+    setName('');
     setEmail('');
+    setPassword('');
+    setSendInvite(false);
     setShowForm(false);
   }
 
@@ -102,36 +105,121 @@ export default function PatronsPage() {
     setErrorMessage(null);
     setOkMessage(null);
 
-    const firstNameTrimmed = firstName.trim();
-    const lastNameTrimmed = lastName.trim();
-    if (!firstNameTrimmed && !lastNameTrimmed) {
-      setErrorMessage('First name or last name is required.');
+    const nameTrimmed = name.trim();
+    const emailTrimmed = email.trim();
+    if (!nameTrimmed) {
+      setErrorMessage('Name is required.');
+      return;
+    }
+    if (!emailTrimmed) {
+      setErrorMessage('Email is required.');
       return;
     }
 
-    try {
-      const { data, error } = await supabase
-        .from('profiles')
-        .insert([{
-          first_name: firstNameTrimmed || null,
-          last_name: lastNameTrimmed || null,
-          email: email.trim() || null,
-          role: 'patron',
-        }])
-        .select();
+    if (!sendInvite && !password.trim()) {
+      setErrorMessage('Password is required when using manual password entry.');
+      return;
+    }
+    if (!sendInvite && password.length < 6) {
+      setErrorMessage('Password must be at least 6 characters.');
+      return;
+    }
 
-      if (error) throw new Error(error.message);
-      if (!data || data.length === 0) throw new Error('Failed to create patron — no data returned.');
+    setCreating(true);
+
+    try {
+      const userMetadata = { display_name: nameTrimmed, role: 'patron' };
+
+      if (sendInvite) {
+        // ── Invite via email (uses Edge Function with service role key) ──
+        const response = await fetch(
+          `${process.env.NEXT_PUBLIC_SUPABASE_URL}/functions/v1/send-invite`,
+          {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              Authorization: `Bearer ${process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY}`,
+            },
+            body: JSON.stringify({ email: emailTrimmed, data: userMetadata }),
+          }
+        );
+
+        const result = await response.json();
+
+        if (!response.ok) {
+          setErrorMessage(`Failed to send invite: ${result.error}`);
+          setCreating(false);
+          return;
+        }
+
+        // Wait for auth trigger to create profile, then update role
+        await new Promise((resolve) => setTimeout(resolve, 1000));
+
+        // Check if profile exists (trigger may have created it with default role)
+        const { data: existingProfile } = await supabase
+          .from('profiles')
+          .select('id')
+          .eq('email', emailTrimmed)
+          .single();
+
+        if (existingProfile) {
+          await supabase
+            .from('profiles')
+            .update({ role: 'patron', name: nameTrimmed })
+            .eq('id', existingProfile.id);
+        } else {
+          // Try to find user by email in auth.users
+          const { data: authUsers } = await supabase.auth.admin.listUsers();
+          const authUser = authUsers?.users.find((u: any) => u.email === emailTrimmed);
+          if (authUser) {
+            await supabase
+              .from('profiles')
+              .update({ role: 'patron', name: nameTrimmed })
+              .eq('id', authUser.id);
+          }
+        }
+
+        setOkMessage(`Invite sent to "${nameTrimmed}" (${emailTrimmed}).`);
+      } else {
+        // ── Manual password: create via auth (uses anon key) ──
+        const { data: authData, error: authErr } = await supabase.auth.signUp({
+          email: emailTrimmed,
+          password: password.trim(),
+          options: { data: userMetadata },
+        });
+
+        if (authErr) {
+          if (authErr.message?.includes('already registered')) {
+            setErrorMessage('A user with this email already exists.');
+          } else {
+            setErrorMessage(`Failed to create user: ${authErr.message}`);
+          }
+          setCreating(false);
+          return;
+        }
+
+        if (authData?.user) {
+          // The trigger creates the profile with default role
+          // Update to patron and set name
+          await supabase
+            .from('profiles')
+            .update({ role: 'patron', name: nameTrimmed })
+            .eq('id', authData.user.id);
+        }
+
+        setOkMessage(`Patron "${nameTrimmed}" created successfully.`);
+      }
 
       resetForm();
       await loadPatrons();
       await loadStats();
-      setOkMessage('Patron created successfully!');
-      setTimeout(() => setOkMessage(null), 3000);
+      setTimeout(() => setOkMessage(null), 4000);
     } catch (err: any) {
       console.error('Failed to create patron:', err);
       setErrorMessage(err.message || 'Failed to create patron.');
       setTimeout(() => setErrorMessage(null), 5000);
+    } finally {
+      setCreating(false);
     }
   }
 
@@ -255,7 +343,7 @@ export default function PatronsPage() {
           onClick={closeAndReset}
         >
           <div
-            className="bg-white rounded-xl shadow-xl w-full max-w-lg relative"
+            className="bg-white rounded-xl shadow-xl w-full max-w-lg relative max-h-[90vh] overflow-y-auto"
             onClick={(e) => e.stopPropagation()}
           >
             {/* Modal header with close button */}
@@ -274,40 +362,25 @@ export default function PatronsPage() {
 
             {/* Modal body */}
             <form onSubmit={handleCreate} className="px-6 pb-6 pt-4 space-y-4">
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label htmlFor="patron-first" className="block text-sm font-medium text-slate-700 mb-1">
-                    First Name <span className="text-red-500">*</span>
-                  </label>
-                  <input
-                    id="patron-first"
-                    type="text"
-                    value={firstName}
-                    onChange={e => setFirstName(e.target.value)}
-                    className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-indigo-500 focus:ring-indigo-500"
-                    placeholder="First name"
-                    autoFocus
-                    required
-                  />
-                </div>
-                <div>
-                  <label htmlFor="patron-last" className="block text-sm font-medium text-slate-700 mb-1">
-                    Last Name
-                  </label>
-                  <input
-                    id="patron-last"
-                    type="text"
-                    value={lastName}
-                    onChange={e => setLastName(e.target.value)}
-                    className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-indigo-500 focus:ring-indigo-500"
-                    placeholder="Last name"
-                  />
-                </div>
+              <div>
+                <label htmlFor="patron-name" className="block text-sm font-medium text-slate-700 mb-1">
+                  Name <span className="text-red-500">*</span>
+                </label>
+                <input
+                  id="patron-name"
+                  type="text"
+                  value={name}
+                  onChange={e => setName(e.target.value)}
+                  className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-indigo-500 focus:ring-indigo-500"
+                  placeholder="Full name"
+                  autoFocus
+                  required
+                />
               </div>
 
               <div>
                 <label htmlFor="patron-email" className="block text-sm font-medium text-slate-700 mb-1">
-                  Email
+                  Email <span className="text-red-500">*</span>
                 </label>
                 <input
                   id="patron-email"
@@ -316,15 +389,56 @@ export default function PatronsPage() {
                   onChange={e => setEmail(e.target.value)}
                   className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-indigo-500 focus:ring-indigo-500"
                   placeholder="patron@example.com"
+                  required
                 />
               </div>
+
+              {/* Password field - shown only when NOT sending invite */}
+              {!sendInvite && (
+                <div>
+                  <label htmlFor="patron-password" className="block text-sm font-medium text-slate-700 mb-1">
+                    Password <span className="text-red-500">*</span>
+                  </label>
+                  <input
+                    id="patron-password"
+                    type="password"
+                    value={password}
+                    onChange={e => setPassword(e.target.value)}
+                    className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-indigo-500 focus:ring-indigo-500"
+                    placeholder="At least 6 characters"
+                    minLength={6}
+                    required={!sendInvite}
+                  />
+                </div>
+              )}
+
+              {/* Send invite checkbox */}
+              <div className="flex items-start gap-2">
+                <input
+                  id="send-invite"
+                  type="checkbox"
+                  checked={sendInvite}
+                  onChange={(e) => setSendInvite(e.target.checked)}
+                  className="mt-1 h-4 w-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500"
+                />
+                <label htmlFor="send-invite" className="text-sm text-slate-600">
+                  Send invitation email (user sets their own password)
+                </label>
+              </div>
+
+              <p className="text-xs text-slate-400">
+                To disable confirmation emails entirely, toggle{' '}
+                <code className="text-slate-500">Confirm email</code> off in{' '}
+                <code className="text-slate-500">Supabase Dashboard → Authentication → Settings</code>.
+              </p>
 
               <div className="flex gap-3 pt-2">
                 <button
                   type="submit"
-                  className="flex-1 rounded-lg bg-indigo-600 px-4 py-2.5 text-sm font-medium text-white shadow-sm hover:bg-indigo-700 transition-colors"
+                  className="flex-1 rounded-lg bg-indigo-600 px-4 py-2.5 text-sm font-medium text-white shadow-sm hover:bg-indigo-700 transition-colors disabled:opacity-50"
+                  disabled={creating}
                 >
-                  Create Patron
+                  {creating ? 'Creating...' : sendInvite ? 'Send Invite' : 'Create Patron'}
                 </button>
                 <button
                   type="button"

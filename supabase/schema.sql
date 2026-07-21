@@ -20,7 +20,10 @@ CREATE TABLE IF NOT EXISTS profiles (
     id uuid PRIMARY KEY REFERENCES auth.users(id),
     name text DEFAULT '',
     email text,
+    first_name text,
+    last_name text,
     role text CHECK (role IN ('system_admin','library_owner','librarian','patron')),
+    status text CHECK (status IN ('pending','active','suspended')),
     created_at timestamptz NOT NULL DEFAULT now()
 );
 
@@ -126,8 +129,8 @@ CREATE TABLE borrows (
     patron_user_id uuid REFERENCES profiles(id),
     copy_id uuid REFERENCES book_copies(id),
     checkout_date date NOT NULL,
-    due_date date,  
-    returned_at timestamptz,
+    due_date date,
+    return_date date,
     created_at timestamptz NOT NULL DEFAULT now(),
     updated_at timestamptz NOT NULL DEFAULT now()
 );
