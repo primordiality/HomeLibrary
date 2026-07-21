@@ -118,7 +118,6 @@ export default function PatronsPage() {
       setErrorMessage('Email is required.');
       return;
     }
-
     if (!sendInvite && !password.trim()) {
       setErrorMessage('Password is required when using manual password entry.');
       return;
@@ -131,132 +130,42 @@ export default function PatronsPage() {
     setCreating(true);
 
     try {
-      // Build full name for display_name in user metadata
       const fullName = `${firstNameTrimmed} ${lastNameTrimmed}`.trim() || firstNameTrimmed || lastNameTrimmed;
-      const userMetadata = { display_name: fullName, role: 'patron' };
 
-      if (sendInvite) {
-        // ── Invite via email (uses Edge Function with service role key) ──
-        const response = await fetch(
-          `${process.env.NEXT_PUBLIC_SUPABASE_URL}/functions/v1/send-invite`,
-          {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              Authorization: `Bearer ${process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY}`,
-            },
-            body: JSON.stringify({ email: emailTrimmed, data: userMetadata }),
-          }
-        );
-
-        const result = await response.json();
-
-        if (!response.ok) {
-          setErrorMessage(`Failed to send invite: ${result.error}`);
-          setCreating(false);
-          return;
+      const response = await fetch(
+        `${process.env.NEXT_PUBLIC_SUPABASE_URL}/functions/v1/send-invite`,
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY}`,
+          },
+          body: JSON.stringify({
+            email: emailTrimmed,
+            first_name: firstNameTrimmed || null,
+            last_name: lastNameTrimmed || null,
+            password: sendInvite ? undefined : password.trim(),
+            send_invite: sendInvite,
+          }),
         }
+      );
 
-        // Wait for auth trigger to create profile, then update role
-        await new Promise((resolve) => setTimeout(resolve, 1000));
+      const result = await response.json();
 
-        // Check if profile exists (trigger may have created it with default role)
-        const { data: existingProfile } = await supabase
-          .from('profiles')
-          .select('id')
-          .eq('email', emailTrimmed)
-          .single();
-
-        if (existingProfile) {
-          await supabase
-            .from('profiles')
-            .update({
-              role: 'patron',
-              name: fullName,
-              first_name: firstNameTrimmed || null,
-              last_name: lastNameTrimmed || null,
-            })
-            .eq('id', existingProfile.id);
-        } else {
-          // Try to find user by email in auth.users
-          const { data: authUsers } = await supabase.auth.admin.listUsers();
-          const authUser = authUsers?.users.find((u: any) => u.email === emailTrimmed);
-          if (authUser) {
-            await supabase
-              .from('profiles')
-              .update({
-                role: 'patron',
-                name: fullName,
-                first_name: firstNameTrimmed || null,
-                last_name: lastNameTrimmed || null,
-              })
-              .eq('id', authUser.id);
-          }
-        }
-
-        setOkMessage(`Invite sent to "${fullName}" (${emailTrimmed}).`);
-      } else {
-        // ── Manual password: create via auth (uses anon key) ──
-        const { data: authData, error: authErr } = await supabase.auth.signUp({
-          email: emailTrimmed,
-          password: password.trim(),
-          options: { data: userMetadata },
-        });
-
-        if (authErr) {
-          console.error('Auth error:', authErr);
-          console.error('Auth error keys:', Object.keys(authErr));
-          console.error('Auth error body:', JSON.stringify(authErr));
-          // Supabase errors have structure: { name, message, status, code }
-          // But network/server errors can have empty or useless message
-          const is500 = authErr.status === 500;
-          let errorMsg: string;
-          if (is500) {
-            errorMsg = `[${authErr.status}] Supabase server error — the auth trigger may be failing. ` +
-              'Check console for details. Verify schema matches (profiles.id FK to auth.users, columns exist).';
-          } else if (authErr.message === '{}' || !authErr.message) {
-            errorMsg = `Failed to create user (${authErr.name || 'unknown error'}). ` +
-              'Check your Supabase project settings and ensure the "Confirm email" setting is configured.';
-          } else {
-            errorMsg = authErr.message;
-          }
-          if (authErr.message?.includes('already registered')) {
-            setErrorMessage('A user with this email already exists.');
-          } else if (authErr.message?.includes('confirm')) {
-            setErrorMessage('Email confirmation is required. Please check Supabase Dashboard → Authentication → Settings → Email Confirm.');
-          } else {
-            setErrorMessage(`Failed to create user: ${errorMsg}`);
-          }
-          setCreating(false);
-          return;
-        }
-
-        if (authData?.user) {
-          // The trigger creates the profile with default role
-          // Update to patron and set name/first_name/last_name
-          await supabase
-            .from('profiles')
-            .update({
-              role: 'patron',
-              name: fullName,
-              first_name: firstNameTrimmed || null,
-              last_name: lastNameTrimmed || null,
-            })
-            .eq('id', authData.user.id);
-        }
-
-        setOkMessage(`Patron "${fullName}" created successfully.`);
+      if (!response.ok) {
+        setErrorMessage(result.error || 'Failed to create patron.');
+        setCreating(false);
+        return;
       }
 
+      setOkMessage(sendInvite ? `Invite sent to "${fullName}" (${emailTrimmed}).` : `Patron "${fullName}" created successfully.`);
       resetForm();
       await loadPatrons();
       await loadStats();
-      setOkMessage(sendInvite ? `Invite sent to "${fullName}" (${emailTrimmed}).` : `Patron "${fullName}" created successfully.`);
       setTimeout(() => setOkMessage(null), 4000);
     } catch (err: any) {
       console.error('Failed to create patron:', err);
-      // Supabase errors can be objects without .message — show full error
-      const errDetail = err?.message || err?.status || err?.code || typeof err === 'object' ? JSON.stringify(err) : String(err);
+      const errDetail = err?.message || String(err);
       setErrorMessage(errDetail || 'Failed to create patron. Check console for details.');
       setTimeout(() => setErrorMessage(null), 5000);
     } finally {
