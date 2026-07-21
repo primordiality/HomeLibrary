@@ -208,14 +208,22 @@ export default function PatronsPage() {
           console.error('Auth error keys:', Object.keys(authErr));
           console.error('Auth error body:', JSON.stringify(authErr));
           // Supabase errors have structure: { name, message, status, code }
-          // But network errors can be empty objects
-          const errorMsg = authErr.message || authErr.status || authErr.code || (authErr as any).details || (authErr as any).hint || JSON.stringify(authErr);
+          // But network/server errors can have empty or useless message
+          const is500 = authErr.status === 500;
+          let errorMsg: string;
+          if (is500) {
+            errorMsg = `[${authErr.status}] Supabase server error — the auth trigger may be failing. ` +
+              'Check console for details. Verify schema matches (profiles.id FK to auth.users, columns exist).';
+          } else if (authErr.message === '{}' || !authErr.message) {
+            errorMsg = `Failed to create user (${authErr.name || 'unknown error'}). ` +
+              'Check your Supabase project settings and ensure the "Confirm email" setting is configured.';
+          } else {
+            errorMsg = authErr.message;
+          }
           if (authErr.message?.includes('already registered')) {
             setErrorMessage('A user with this email already exists.');
           } else if (authErr.message?.includes('confirm')) {
             setErrorMessage('Email confirmation is required. Please check Supabase Dashboard → Authentication → Settings → Email Confirm.');
-          } else if (errorMsg === '{}') {
-            setErrorMessage('Failed to create user: No error details returned. Check your Supabase anon key and network connection.');
           } else {
             setErrorMessage(`Failed to create user: ${errorMsg}`);
           }
