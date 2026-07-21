@@ -1,9 +1,13 @@
 'use client';
-import { useState, useEffect } from 'react';
+import { useState, useEffect, Suspense } from 'react';
+import { useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import { supabase } from '@/lib/supabase/client';
 
-export default function BorrowingsPage() {
+function BorrowingsContent() {
+  const searchParams = useSearchParams();
+  const urlPatronId = searchParams.get('patronId') || '';
+
   const [patronMap, setPatronMap] = useState<Record<string, string>>({});
   const [patronsAll, setPatronsAll] = useState<any[]>([]);
   const [activeBorrows, setActiveBorrows] = useState<any[]>([]);
@@ -11,7 +15,7 @@ export default function BorrowingsPage() {
   const [booksMap, setBooksMap] = useState<Record<string, { title: string; cover_url: string | null }>>({});
 
   // Filters
-  const [patronFilterId, setPatronFilterId] = useState('');
+  const [patronFilterId, setPatronFilterId] = useState(urlPatronId);
   const [searchTerm, setSearchTerm] = useState('');
 
   // Staff checkout modal
@@ -902,4 +906,12 @@ export default function BorrowingsPage() {
          )}
        </div>
    );
+}
+
+export default function BorrowingsPage() {
+  return (
+    <Suspense fallback={<p className="text-sm text-slate-500">Loading...</p>}>
+      <BorrowingsContent />
+    </Suspense>
+  );
 }

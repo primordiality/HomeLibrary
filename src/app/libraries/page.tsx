@@ -276,7 +276,7 @@ export default function LibrariesPage() {
                                 {libraries.map((lib) => (
                                   <div key={lib.id} className="flex items-center justify-between rounded-xl border border-slate-200 bg-white p-6 shadow-sm transition hover:shadow-md">
                                       <div className="flex-1 min-w-0">
-                                          <Link href={`/catalogs?library=${lib.id}`} className="font-semibold text-indigo-600 hover:text-indigo-800 text-sm font-medium">
+                                          <Link href={`/catalog?library=${lib.id}`} className="font-semibold text-indigo-600 hover:text-indigo-800 text-sm font-medium">
                                          {lib.name} <span className="text-slate-500">({lib.description || 'No description'})</span>
                                       </Link>
                                      </div>
