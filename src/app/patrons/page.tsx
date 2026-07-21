@@ -204,10 +204,20 @@ export default function PatronsPage() {
         });
 
         if (authErr) {
+          console.error('Auth error:', authErr);
+          console.error('Auth error keys:', Object.keys(authErr));
+          console.error('Auth error body:', JSON.stringify(authErr));
+          // Supabase errors have structure: { name, message, status, code }
+          // But network errors can be empty objects
+          const errorMsg = authErr.message || authErr.status || authErr.code || (authErr as any).details || (authErr as any).hint || JSON.stringify(authErr);
           if (authErr.message?.includes('already registered')) {
             setErrorMessage('A user with this email already exists.');
+          } else if (authErr.message?.includes('confirm')) {
+            setErrorMessage('Email confirmation is required. Please check Supabase Dashboard → Authentication → Settings → Email Confirm.');
+          } else if (errorMsg === '{}') {
+            setErrorMessage('Failed to create user: No error details returned. Check your Supabase anon key and network connection.');
           } else {
-            setErrorMessage(`Failed to create user: ${authErr.message}`);
+            setErrorMessage(`Failed to create user: ${errorMsg}`);
           }
           setCreating(false);
           return;
@@ -237,7 +247,9 @@ export default function PatronsPage() {
       setTimeout(() => setOkMessage(null), 4000);
     } catch (err: any) {
       console.error('Failed to create patron:', err);
-      setErrorMessage(err.message || 'Failed to create patron.');
+      // Supabase errors can be objects without .message — show full error
+      const errDetail = err?.message || err?.status || err?.code || typeof err === 'object' ? JSON.stringify(err) : String(err);
+      setErrorMessage(errDetail || 'Failed to create patron. Check console for details.');
       setTimeout(() => setErrorMessage(null), 5000);
     } finally {
       setCreating(false);
