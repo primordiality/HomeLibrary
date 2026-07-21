@@ -908,10 +908,12 @@ function BorrowingsContent() {
    );
 }
 
-export default function BorrowingsPage() {
+function BorrowingsPage() {
   return (
     <Suspense fallback={<p className="text-sm text-slate-500">Loading...</p>}>
       <BorrowingsContent />
     </Suspense>
   );
 }
+
+export default BorrowingsPage;
