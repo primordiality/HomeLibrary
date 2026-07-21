@@ -39,6 +39,11 @@ export default function BookDetailPage({ params }: { params: { bookId: string } 
   const [placeHoldError, setPlaceHoldError] = useState<string | null>(null);
   const [placeHoldSuccess, setPlaceHoldSuccess] = useState<string | null>(null);
 
+  // Borrow state
+  const [borrowLoading, setBorrowLoading] = useState(false);
+  const [borrowSuccess, setBorrowSuccess] = useState<string | null>(null);
+  const [borrowError, setBorrowError] = useState<string | null>(null);
+
   const bookId = params.bookId;
 
   useEffect(() => {
@@ -65,11 +70,14 @@ export default function BookDetailPage({ params }: { params: { bookId: string } 
       if (copiesData) setCopies(copiesData);
 
       // Load active borrows (no return_date)
-      const { data: borrowsData } = await supabase
-        .from('borrows')
-        .select('*')
-        .eq('copy_id', copiesData?.map((c: any) => c.id).join(','));
-      if (borrowsData) setBorrows(borrowsData);
+      const copyIds = copiesData?.map((c: any) => c.id) || [];
+      if (copyIds.length > 0) {
+        const { data: borrowsData } = await supabase
+          .from('borrows')
+          .select('*')
+          .in('copy_id', copyIds);
+        if (borrowsData) setBorrows(borrowsData);
+      }
 
       // Load holds for this book
       const { data: holdsData } = await supabase
@@ -183,6 +191,58 @@ export default function BookDetailPage({ params }: { params: { bookId: string } 
     }
   }
 
+  // Borrow book flow
+  async function handleBorrow(copyId: string): Promise<void> {
+    if (!user) return;
+    setBorrowLoading(true);
+    setBorrowError(null);
+    setBorrowSuccess(null);
+    try {
+      const today = new Date();
+      const checkoutDate = today.toISOString().split('T')[0];
+      const dueDate = new Date(today);
+      dueDate.setDate(dueDate.getDate() + 14);
+      const dueDateStr = dueDate.toISOString().split('T')[0];
+
+      const { error } = await supabase.from('borrows').insert({
+        patron_user_id: user.id,
+        copy_id: copyId,
+        checkout_date: checkoutDate,
+        due_date: dueDateStr,
+      });
+
+      if (error) {
+        setBorrowError(error.message);
+      } else {
+        // Optimistic update: remove the copy from available, add to borrows
+        const dueDateDisplay = new Date(dueDateStr).toLocaleDateString(undefined, {
+          year: 'numeric',
+          month: 'long',
+          day: 'numeric',
+        });
+        setBorrowSuccess(`Book borrowed successfully. Due ${dueDateDisplay}.`);
+        // Remove the borrowed copy from copies list
+        setCopies((prev) => prev.filter((c) => c.id !== copyId));
+        // Add to borrows list
+        setBorrows((prev) => [...prev, {
+          patron_user_id: user.id,
+          copy_id: copyId,
+          checkout_date: checkoutDate,
+          due_date: dueDateStr,
+          return_date: null,
+        }]);
+        // Hide success message after 3 seconds
+        setTimeout(() => setBorrowSuccess(null), 3000);
+        // Refresh the page to sync state
+        router.refresh();
+      }
+    } catch (err) {
+      setBorrowError('Failed to borrow book. Please try again.');
+    } finally {
+      setBorrowLoading(false);
+    }
+  }
+
   // Build copies with status
   const copiesWithStatus: CopyDetail[] = copies.map((copy) => {
     const borrow = borrows.find((b: any) => b.copy_id === copy.id && !b.return_date);
@@ -210,6 +270,14 @@ export default function BookDetailPage({ params }: { params: { bookId: string } 
   const totalCopies = copies.length;
   const availableCopies = copiesWithStatus.filter(c => c.status === 'available').length;
   const allCheckedOut = availableCopies === 0 && totalCopies > 0;
+
+  // Check if user already has this book checked out
+  const userHasBook = user && borrows.some(
+    (b: any) => b.patron_user_id === user.id && !b.return_date
+  );
+
+  // Get an available copy for the borrow button
+  const availableCopy = copiesWithStatus.find((c) => c.status === 'available');
 
   if (loading || authLoading) return <p className="text-sm text-slate-500">Loading...</p>;
   if (!book) return <p className="text-red-600">Book not found.</p>;
@@ -244,6 +312,46 @@ export default function BookDetailPage({ params }: { params: { bookId: string } 
           )}
         </div>
       </header>
+
+      {/* Patron Borrow Section */}
+      {isPatron && user && !allCheckedOut && !userHasBook && availableCopy && (
+        <div className="rounded-xl border border-indigo-200 bg-indigo-50 p-4">
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="text-sm font-medium text-indigo-900">Available to borrow</p>
+              <p className="text-xs text-indigo-600 mt-0.5">Due in 14 days</p>
+            </div>
+            <button
+              onClick={() => handleBorrow(availableCopy.id)}
+              disabled={borrowLoading}
+              className="rounded-lg bg-indigo-600 px-5 py-2.5 text-sm font-medium text-white shadow-sm hover:bg-indigo-700 transition disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              {borrowLoading ? 'Borrowing...' : 'Borrow This Book'}
+            </button>
+          </div>
+          {borrowSuccess && (
+            <p className="mt-2 text-sm text-green-700 font-medium">{borrowSuccess}</p>
+          )}
+          {borrowError && (
+            <p className="mt-2 text-sm text-red-600">{borrowError}</p>
+          )}
+        </div>
+      )}
+
+      {/* Already have this book */}
+      {isPatron && user && userHasBook && (
+        <div className="rounded-xl border border-amber-200 bg-amber-50 p-4">
+          <p className="text-sm font-medium text-amber-800">
+            You already have this book checked out.
+          </p>
+          <Link
+            href="/patrons/dashboard"
+            className="mt-2 inline-block text-sm text-indigo-600 hover:text-indigo-800 font-medium"
+          >
+            View your dashboard →
+          </Link>
+        </div>
+      )}
 
       {/* Full Book Info */}
       <div className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm space-y-4">
@@ -313,7 +421,7 @@ export default function BookDetailPage({ params }: { params: { bookId: string } 
                   href="/signin"
                   className="text-sm font-medium text-indigo-600 hover:text-indigo-800"
                 >
-                  Sign in to place a hold &rarr;
+                  Sign in to place a hold →
                 </Link>
               </div>
             ) : (

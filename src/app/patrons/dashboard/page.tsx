@@ -28,15 +28,20 @@ interface HoldRow {
   created_at: string;
 }
 
+type TabType = 'current' | 'past';
+
 export default function PatronDashboardPage() {
   const { user } = useAuth();
   const [loading, setLoading] = useState(true);
 
   const [activeBorrows, setActiveBorrows] = useState<BorrowRow[]>([]);
+  const [pastBorrows, setPastBorrows] = useState<BorrowRow[]>([]);
   const [holds, setHolds] = useState<HoldRow[]>([]);
   const [bookMap, setBookMap] = useState<Record<string, BookInfo>>({});
   // copy_id → book_id mapping
   const [copyToBook, setCopyToBook] = useState<Record<string, string>>({});
+
+  const [activeTab, setActiveTab] = useState<TabType>('current');
 
   useEffect(() => {
     if (!user) {
@@ -58,8 +63,20 @@ export default function PatronDashboardPage() {
         const activeList: BorrowRow[] = (borrows ?? []) as BorrowRow[];
         setActiveBorrows(activeList);
 
-        // 2. Load book_copies for the copies in these borrows
-        const copyIds = activeList.map((b) => b.copy_id);
+        // 2. Load past borrows (return_date IS NOT NULL)
+        const { data: pastData, error: pastErr } = await supabase
+          .from('borrows')
+          .select('id, patron_user_id, copy_id, checkout_date, due_date, return_date')
+          .eq('patron_user_id', user.id)
+          .not('return_date', 'is', null)
+          .order('return_date', { ascending: false })
+          .limit(50);
+        if (pastErr) throw new Error(pastErr.message);
+        setPastBorrows((pastData ?? []) as BorrowRow[]);
+
+        // 3. Load book_copies for the copies in these borrows (both active and past)
+        const allBorrows = [...activeList, ...((pastData ?? []) as BorrowRow[])];
+        const copyIds = allBorrows.map((b) => b.copy_id);
         const copyIdToBookId: Record<string, string> = {};
         if (copyIds.length > 0) {
           const { data: copies } = await supabase
@@ -74,7 +91,7 @@ export default function PatronDashboardPage() {
         }
         setCopyToBook(copyIdToBookId);
 
-        // 3. Load books batch
+        // 4. Load books batch
         const bookIds = [...new Set(Object.values(copyIdToBookId))];
         const bMap: Record<string, BookInfo> = {};
         if (bookIds.length > 0) {
@@ -90,7 +107,7 @@ export default function PatronDashboardPage() {
         }
         setBookMap(bMap);
 
-        // 4. Load holds (waiting or accepted)
+        // 5. Load holds (waiting or accepted)
         const { data: holdsData, error: holdsErr } = await supabase
           .from('holds')
           .select('id, patron_user_id, book_id, status, created_at')
@@ -118,9 +135,23 @@ export default function PatronDashboardPage() {
   const activeCount = activeBorrows.length;
   const holdsCount = holds.length;
   const overdueCount = overdueBorrows.length;
+  const pastCount = pastBorrows.length;
 
   function isOverdue(borrow: BorrowRow): boolean {
     return !!borrow.due_date && borrow.due_date < today;
+  }
+
+  function daysRemaining(dueDate: string | null): string {
+    if (!dueDate) return 'No due date';
+    const due = new Date(dueDate);
+    const now = new Date();
+    now.setHours(0, 0, 0, 0);
+    due.setHours(0, 0, 0, 0);
+    const diff = Math.ceil((due.getTime() - now.getTime()) / (1000 * 60 * 60 * 24));
+    if (diff < 0) return `${Math.abs(diff)} day${Math.abs(diff) !== 1 ? 's' : ''} overdue`;
+    if (diff === 0) return 'Due today';
+    if (diff === 1) return 'Due tomorrow';
+    return `${diff} day${diff !== 1 ? 's' : ''} remaining`;
   }
 
   function formatDisplayDate(isoStr: string): string {
@@ -146,13 +177,20 @@ export default function PatronDashboardPage() {
       </header>
 
       {/* Stats cards */}
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-4">
         {/* Active Loans */}
         <div className="rounded-xl border bg-white p-6 shadow-sm">
           <p className="text-2xl font-bold tracking-tight text-indigo-600">
             {loading ? '—' : activeCount}
           </p>
           <p className="text-sm text-slate-500">Active Loans</p>
+        </div>
+        {/* Past Loans */}
+        <div className="rounded-xl border bg-white p-6 shadow-sm">
+          <p className="text-2xl font-bold tracking-tight text-slate-600">
+            {loading ? '—' : pastCount}
+          </p>
+          <p className="text-sm text-slate-500">Past Loans</p>
         </div>
         {/* Holds */}
         <div className="rounded-xl border bg-white p-6 shadow-sm">
@@ -170,82 +208,171 @@ export default function PatronDashboardPage() {
         </div>
       </div>
 
-      {/* Active Loans */}
+      {/* Active Loans with tabs */}
       <section className="rounded-xl border bg-white p-6 shadow-sm">
-        <h2 className="text-lg font-semibold mb-4">My Active Loans</h2>
+        <div className="flex items-center justify-between mb-4">
+          <h2 className="text-lg font-semibold">My Borrowing History</h2>
+          <div className="flex rounded-lg border border-slate-200 overflow-hidden">
+            <button
+              onClick={() => setActiveTab('current')}
+              className={`px-4 py-1.5 text-sm font-medium transition ${
+                activeTab === 'current'
+                  ? 'bg-indigo-600 text-white'
+                  : 'bg-white text-slate-600 hover:bg-slate-50'
+              }`}
+            >
+              Current Loans
+            </button>
+            <button
+              onClick={() => setActiveTab('past')}
+              className={`px-4 py-1.5 text-sm font-medium transition ${
+                activeTab === 'past'
+                  ? 'bg-indigo-600 text-white'
+                  : 'bg-white text-slate-600 hover:bg-slate-50'
+              }`}
+            >
+              Past Loans
+            </button>
+          </div>
+        </div>
+
         {loading ? (
           <p className="text-sm text-slate-500">Loading...</p>
-        ) : activeCount > 0 ? (
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead className="border-b bg-slate-50">
-                <tr className="text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
-                  <th className="py-3 pl-2">Book</th>
-                  <th className="py-3">Checkout Date</th>
-                  <th className="py-3">Due Date</th>
-                  <th className="py-3 text-right">Status</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y">
-                {activeBorrows.map((borrow) => {
-                  const bookId = copyToBook[borrow.copy_id];
-                  const overdue = isOverdue(borrow);
-                  return (
-                    <tr key={borrow.id} className="hover:bg-slate-50">
-                      <td className="py-3 pl-2">
-                        {bookId ? (
+        ) : activeTab === 'current' ? (
+          activeCount > 0 ? (
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead className="border-b bg-slate-50">
+                  <tr className="text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
+                    <th className="py-3 pl-2">Book</th>
+                    <th className="py-3">Checkout Date</th>
+                    <th className="py-3">Due Date</th>
+                    <th className="py-3">Status</th>
+                    <th className="py-3 text-right">Action</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y">
+                  {activeBorrows.map((borrow) => {
+                    const bookId = copyToBook[borrow.copy_id];
+                    const overdue = isOverdue(borrow);
+                    const days = borrow.due_date ? daysRemaining(borrow.due_date) : 'No due date';
+                    return (
+                      <tr key={borrow.id} className={`hover:bg-slate-50 ${overdue ? 'bg-red-50/50' : ''}`}>
+                        <td className="py-3 pl-2">
+                          {bookId ? (
+                            <Link
+                              href={`/catalog/${bookId}`}
+                              className="font-medium text-indigo-600 hover:text-indigo-800 transition-colors"
+                            >
+                              {bookTitle(bookId)}
+                            </Link>
+                          ) : (
+                            <span className="text-slate-400">Book not found</span>
+                          )}
+                        </td>
+                        <td className="py-3 text-slate-600">
+                          {formatDisplayDate(borrow.checkout_date)}
+                        </td>
+                        <td className="py-3">
+                          {borrow.due_date ? (
+                            <span className={overdue ? 'text-red-600 font-medium' : 'text-slate-600'}>
+                              {formatDisplayDate(borrow.due_date)}
+                            </span>
+                          ) : (
+                            <span className="text-slate-400">No due date set</span>
+                          )}
+                        </td>
+                        <td className="py-3">
+                          <div className="flex flex-col gap-1">
+                            {overdue ? (
+                              <span className="inline-flex items-center rounded-full bg-red-100 px-2.5 py-0.5 text-xs font-medium text-red-700 self-start">
+                                Overdue
+                              </span>
+                            ) : (
+                              <span className="inline-flex items-center rounded-full bg-green-100 px-2.5 py-0.5 text-xs font-medium text-green-700 self-start">
+                                Active
+                              </span>
+                            )}
+                            <span className={`text-xs ${overdue ? 'text-red-500 font-medium' : 'text-slate-400'}`}>
+                              {days}
+                            </span>
+                          </div>
+                        </td>
+                        <td className="py-3 text-right">
                           <Link
-                            href={`/catalog/${bookId}`}
-                            className="font-medium text-indigo-600 hover:text-indigo-800 transition-colors"
+                            href={`/profile`}
+                            className="text-sm text-indigo-600 hover:text-indigo-800 font-medium"
                           >
-                            {bookTitle(bookId)}
+                            Return
                           </Link>
-                        ) : (
-                          <span className="text-slate-400">Book not found</span>
-                        )}
-                      </td>
-                      <td className="py-3 text-slate-600">
-                        {formatDisplayDate(borrow.checkout_date)}
-                      </td>
-                      <td className="py-3">
-                        {borrow.due_date ? (
-                          <span className={overdue ? 'text-red-600 font-medium' : 'text-slate-600'}>
-                            {formatDisplayDate(borrow.due_date)}
-                          </span>
-                        ) : (
-                          <span className="text-slate-400">No due date set</span>
-                        )}
-                      </td>
-                      <td className="py-3 text-right">
-                        {overdue ? (
-                          <span className="inline-flex items-center rounded-full bg-red-100 px-2.5 py-0.5 text-xs font-medium text-red-700">
-                            Overdue
-                          </span>
-                        ) : (
-                          <span className="inline-flex items-center rounded-full bg-green-100 px-2.5 py-0.5 text-xs font-medium text-green-700">
-                            Active
-                          </span>
-                        )}
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          ) : (
+            <div className="rounded-xl border border-dashed border-slate-300 p-12 text-center">
+              <p className="text-sm font-medium text-slate-600 mb-2">No active loans</p>
+              <p className="text-sm text-slate-500">
+                You don't currently have any books checked out. Browse the catalog to borrow!
+              </p>
+              <Link
+                href="/catalog"
+                className="mt-4 inline-flex items-center rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700 transition-colors"
+              >
+                Browse Catalog
+              </Link>
+            </div>
+          )
         ) : (
-          <div className="rounded-xl border border-dashed border-slate-300 p-12 text-center">
-            <p className="text-sm font-medium text-slate-600 mb-2">No active loans</p>
-            <p className="text-sm text-slate-500">
-              You don't currently have any books checked out. Browse the catalog to borrow!
-            </p>
-            <Link
-              href="/catalog"
-              className="mt-4 inline-flex items-center rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700 transition-colors"
-            >
-              Browse Catalog
-            </Link>
-          </div>
+          /* Past Loans tab */
+          pastCount > 0 ? (
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead className="border-b bg-slate-50">
+                  <tr className="text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
+                    <th className="py-3 pl-2">Book</th>
+                    <th className="py-3">Checkout Date</th>
+                    <th className="py-3">Return Date</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y">
+                  {pastBorrows.map((borrow) => {
+                    const bookId = copyToBook[borrow.copy_id];
+                    return (
+                      <tr key={borrow.id} className="hover:bg-slate-50">
+                        <td className="py-3 pl-2">
+                          {bookId ? (
+                            <Link
+                              href={`/catalog/${bookId}`}
+                              className="font-medium text-indigo-600 hover:text-indigo-800 transition-colors"
+                            >
+                              {bookTitle(bookId)}
+                            </Link>
+                          ) : (
+                            <span className="text-slate-400">Book not found</span>
+                          )}
+                        </td>
+                        <td className="py-3 text-slate-600">
+                          {formatDisplayDate(borrow.checkout_date)}
+                        </td>
+                        <td className="py-3 text-slate-600">
+                          {borrow.return_date ? formatDisplayDate(borrow.return_date) : '—'}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          ) : (
+            <div className="rounded-xl border border-dashed border-slate-300 p-12 text-center">
+              <p className="text-sm font-medium text-slate-600">No past borrows</p>
+              <p className="text-sm text-slate-500">Your returned books will appear here.</p>
+            </div>
+          )
         )}
       </section>
 
