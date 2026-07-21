@@ -3,6 +3,8 @@
 import { useState, useEffect } from 'react';
 import { supabase } from '@/lib/supabase/client';
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
+import { useAuth } from '@/contexts/AuthContext';
 import type { Book } from '@/types/db';
 
 const CONDITION_COLORS: Record<string, string> = {
@@ -13,82 +15,417 @@ const CONDITION_COLORS: Record<string, string> = {
   damaged: 'bg-red-100 text-red-800',
 };
 
+type CopyDetail = {
+  id: string;
+  condition: string;
+  barcode?: string | null;
+  location_name?: string | null;
+  status: 'available' | 'checked_out' | 'on_hold';
+  checkedOutBy?: string;
+  dueDate?: string | null;
+};
+
 export default function BookDetailPage({ params }: { params: { bookId: string } }) {
+  const router = useRouter();
+  const { user, profile, loading: authLoading } = useAuth();
   const [book, setBook] = useState<Book | null>(null);
+  const [copies, setCopies] = useState<any[]>([]);
+  const [borrows, setBorrows] = useState<any[]>([]);
+  const [holds, setHolds] = useState<any[]>([]);
+  const [libraries, setLibraries] = useState<any[]>([]);
+  const [locations, setLocations] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
-  const [showAddCopyForm, setShowAddCopyForm] = useState(false);
+  const [placeHoldLoading, setPlaceHoldLoading] = useState(false);
+  const [placeHoldError, setPlaceHoldError] = useState<string | null>(null);
+  const [placeHoldSuccess, setPlaceHoldSuccess] = useState<string | null>(null);
+
+  const bookId = params.bookId;
 
   useEffect(() => {
-    loadBook();
-   }, []);
+    loadData();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
-  async function loadBook(): Promise<void> {
-     try {
-       const { data } = await supabase
-         .from('books')
-         .select('*')
-         .eq('id', params.bookId)
-         .single();
-      if (data) setBook(data as Book);
-     } catch {
-      console.error('Failed to load book');
-     } finally {
+  async function loadData(): Promise<void> {
+    setLoading(true);
+    try {
+      // Load book details
+      const { data: bookData } = await supabase
+        .from('books')
+        .select('*')
+        .eq('id', bookId)
+        .single();
+      if (bookData) setBook(bookData as Book);
+
+      // Load all copies
+      const { data: copiesData } = await supabase
+        .from('book_copies')
+        .select('*')
+        .eq('book_id', bookId);
+      if (copiesData) setCopies(copiesData);
+
+      // Load active borrows (no return_date)
+      const { data: borrowsData } = await supabase
+        .from('borrows')
+        .select('*')
+        .eq('copy_id', copiesData?.map((c: any) => c.id).join(','));
+      if (borrowsData) setBorrows(borrowsData);
+
+      // Load holds for this book
+      const { data: holdsData } = await supabase
+        .from('hold_requests')
+        .select('*')
+        .eq('book_id', bookId)
+        .in('status', ['waiting', 'accepted']);
+      if (holdsData) setHolds(holdsData);
+
+      // Load libraries
+      const { data: libsData } = await supabase
+        .from('libraries')
+        .select('id, name')
+        .eq('is_archived', false)
+        .order('name');
+      if (libsData) setLibraries(libsData);
+
+      // Load locations
+      const libraryIds = [...new Set((copiesData || []).map((c: any) => c.library_id))];
+      if (libraryIds.length > 0) {
+        const { data: locsData } = await supabase
+          .from('locations')
+          .select('id, library_id, name')
+          .in('library_id', libraryIds);
+        if (locsData) setLocations(locsData);
+      }
+    } catch (err) {
+      console.error('Failed to load book details:', err);
+    } finally {
       setLoading(false);
-     }
-   }
+    }
+  }
 
   async function handleBookUpdate(field: string, value: string | null): Promise<void> {
-    const { error } = await supabase.from('books').update({ [field]: value }).eq('id', params.bookId);
+    const { error } = await supabase.from('books').update({ [field]: value }).eq('id', bookId);
 
     if (!error) {
       setBook((prev) => (prev ? { ...prev, [field]: value } : null));
       alert('Updated successfully.');
-     } else {
+    } else {
       alert(`Update failed: ${error.message}`);
-     }
-   }
+    }
+  }
 
   async function handleUploadCover(file: File): Promise<void> {
-    const fileName = `book-covers/${params.bookId}-${Date.now()}.${file.name.split('.').pop()}`;
+    const fileName = `book-covers/${bookId}-${Date.now()}.${file.name.split('.').pop()}`;
     const { error } = await supabase.storage.from('library-images').upload(fileName, file);
     
     if (error) { alert(`Upload failed: ${error.message}`); return; }
 
     const { data } = await supabase.storage.from('library-images').getPublicUrl(fileName);
 
-    await supabase.from('books').update({ cover_url: data?.publicUrl }).eq('id', params.bookId);
+    await supabase.from('books').update({ cover_url: data?.publicUrl }).eq('id', bookId);
     setBook((prev) => (prev ? { ...prev, cover_url: data?.publicUrl } : null));
     alert('Cover image uploaded.');
-   }
+  }
 
   async function handleUploadPersonalPhoto(file: File): Promise<void> {
-    const fileName = `book-personal/${params.bookId}/${Date.now()}.${file.name.split('.').pop()}`;
+    const fileName = `book-personal/${bookId}/${Date.now()}.${file.name.split('.').pop()}`;
     const { error } = await supabase.storage.from('library-images').upload(fileName, file);
     
     if (error) alert(`Upload failed: ${error.message}`);
     else alert('Photo uploaded.');
-   }
+  }
 
   async function handleDeleteCover(): Promise<void> {
-     const confirmed = window.confirm('Delete the cover image from storage? This cannot be undone.');
-     if (!confirmed) return;
+    const confirmed = window.confirm('Delete the cover image from storage? This cannot be undone.');
+    if (!confirmed) return;
 
-     setBook((prev) => (prev ? { ...prev, cover_url: null } : null));
-   }
+    setBook((prev) => (prev ? { ...prev, cover_url: null } : null));
+  }
 
-  if (loading) return <p className="text-sm text-slate-500">Loading...</p>;
+  async function handlePlaceHold(): Promise<void> {
+    if (!user) return;
+    setPlaceHoldLoading(true);
+    setPlaceHoldError(null);
+    setPlaceHoldSuccess(null);
+    try {
+      // Pick the library with the most copies for this book
+      const libraryCounts: Record<string, number> = {};
+      for (const copy of copies) {
+        libraryCounts[copy.library_id] = (libraryCounts[copy.library_id] || 0) + 1;
+      }
+      const targetLibrary = Object.entries(libraryCounts).sort((a, b) => b[1] - a[1])[0]?.[0] || '';
+
+      const { error } = await supabase
+        .from('hold_requests')
+        .insert({
+          patron_user_id: user.id,
+          book_id: bookId,
+          library_id: targetLibrary,
+          status: 'waiting',
+        });
+
+      if (error) {
+        setPlaceHoldError(error.message);
+      } else {
+        setPlaceHoldSuccess('Hold placed successfully!');
+        // Refresh holds list
+        const { data: refreshedHolds } = await supabase
+          .from('hold_requests')
+          .select('*')
+          .eq('book_id', bookId)
+          .in('status', ['waiting', 'accepted']);
+        if (refreshedHolds) setHolds(refreshedHolds);
+      }
+    } catch (err) {
+      setPlaceHoldError('Failed to place hold. Please try again.');
+    } finally {
+      setPlaceHoldLoading(false);
+    }
+  }
+
+  // Build copies with status
+  const copiesWithStatus: CopyDetail[] = copies.map((copy) => {
+    const borrow = borrows.find((b: any) => b.copy_id === copy.id && !b.return_date);
+    const hold = holds.find((h: any) => h.book_id === bookId && h.status === 'waiting');
+    const location = locations.find((l: any) => l.id === copy.location_id);
+
+    let status: CopyDetail['status'] = 'available';
+    if (borrow) {
+      status = 'checked_out';
+    } else if (hold && hold.patron_user_id !== user?.id) {
+      status = 'on_hold';
+    }
+
+    return {
+      id: copy.id,
+      condition: copy.condition,
+      barcode: copy.barcode,
+      location_name: location?.name || null,
+      status,
+      checkedOutBy: borrow?.patron_user_id || undefined,
+      dueDate: borrow?.due_date || null,
+    };
+  });
+
+  const totalCopies = copies.length;
+  const availableCopies = copiesWithStatus.filter(c => c.status === 'available').length;
+  const allCheckedOut = availableCopies === 0 && totalCopies > 0;
+
+  if (loading || authLoading) return <p className="text-sm text-slate-500">Loading...</p>;
   if (!book) return <p className="text-red-600">Book not found.</p>;
 
+  const isPatron = profile?.role === 'patron';
+  const isStaff = profile?.role && ['system_admin', 'library_owner', 'librarian'].includes(profile.role);
+
   return (
-     <div className="max-w-4xl mx-auto space-y-8">
+    <div className="max-w-4xl mx-auto space-y-8">
       {/* Header */}
-       <header>
-         <Link href="/catalog" className="text-sm font-medium text-indigo-600 hover:text-indigo-800 mb-2 inline-block">← Back to Catalog</Link>
-         
+      <header>
+        <Link href="/catalog" className="text-sm font-medium text-indigo-600 hover:text-indigo-800 mb-2 inline-block">
+          ← Back to Catalog
+        </Link>
+        
+        <div className="flex items-start justify-between">
           <div>
-           <h1 className="text-3xl font-bold">{book.title || 'Unknown Book'}</h1>
-            <p className="mt-2 text-slate-500">{book.authors?.join(', ') || 'Unknown author'}</p>
+            <h1 className="text-3xl font-bold text-slate-900">{book.title || 'Unknown Book'}</h1>
+            <p className="mt-1 text-lg text-slate-500">
+              {book.authors?.join(', ') || 'Unknown author'}
+            </p>
+            {book.subtitle && (
+              <p className="mt-1 text-sm text-slate-400 italic">{book.subtitle}</p>
+            )}
           </div>
-       </header></div>
-   );
+          {book.cover_url && (
+            <img
+              src={book.cover_url}
+              alt={`${book.title} cover`}
+              className="w-20 h-28 object-cover rounded-lg shadow-sm shrink-0"
+            />
+          )}
+        </div>
+      </header>
+
+      {/* Full Book Info */}
+      <div className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm space-y-4">
+        <h2 className="text-lg font-semibold text-slate-900">Book Details</h2>
+        <div className="grid grid-cols-2 gap-4 text-sm">
+          {book.publisher && (
+            <div>
+              <dt className="text-slate-500">Publisher</dt>
+              <dd className="text-slate-900">{book.publisher}</dd>
+            </div>
+          )}
+          {book.publish_date && (
+            <div>
+              <dt className="text-slate-500">Published</dt>
+              <dd className="text-slate-900">{book.publish_date}</dd>
+            </div>
+          )}
+          {book.pages && (
+            <div>
+              <dt className="text-slate-500">Pages</dt>
+              <dd className="text-slate-900">{book.pages}</dd>
+            </div>
+          )}
+          {book.isbn && (
+            <div>
+              <dt className="text-slate-500">ISBN</dt>
+              <dd className="text-slate-900 font-mono">{book.isbn}</dd>
+            </div>
+          )}
+          {book.language && (
+            <div>
+              <dt className="text-slate-500">Language</dt>
+              <dd className="text-slate-900">{book.language}</dd>
+            </div>
+          )}
+          {book.genres?.length > 0 && (
+            <div>
+              <dt className="text-slate-500">Genres</dt>
+              <dd className="text-slate-900">{book.genres.join(', ')}</dd>
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Copy Status */}
+      <div className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm space-y-4">
+        <div className="flex items-center justify-between">
+          <h2 className="text-lg font-semibold text-slate-900">
+            Copies{totalCopies > 0 && ` (${totalCopies} in this library)`}
+          </h2>
+          {totalCopies > 0 && (
+            <span className="text-sm text-slate-500">
+              {availableCopies} of {totalCopies} available
+            </span>
+          )}
+        </div>
+
+        {/* Place Hold button - patrons only when all checked out */}
+        {isPatron && allCheckedOut && (
+          <div>
+            {!user ? (
+              <div className="rounded-lg bg-slate-50 border border-slate-200 p-4 text-center">
+                <p className="text-sm text-slate-600 mb-2">
+                  All copies are currently checked out.
+                </p>
+                <Link
+                  href="/signin"
+                  className="text-sm font-medium text-indigo-600 hover:text-indigo-800"
+                >
+                  Sign in to place a hold &rarr;
+                </Link>
+              </div>
+            ) : (
+              <div>
+                <button
+                  onClick={handlePlaceHold}
+                  disabled={placeHoldLoading}
+                  className="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-indigo-700 transition disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  {placeHoldLoading ? 'Placing hold...' : 'Place Hold'}
+                </button>
+                {placeHoldSuccess && (
+                  <p className="mt-2 text-sm text-green-600">{placeHoldSuccess}</p>
+                )}
+                {placeHoldError && (
+                  <p className="mt-2 text-sm text-red-600">{placeHoldError}</p>
+                )}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Copy list */}
+        {totalCopies === 0 ? (
+          <p className="text-sm text-slate-500">No copies registered yet.</p>
+        ) : (
+          <ul className="space-y-2">
+            {copiesWithStatus.map((copy) => (
+              <li
+                key={copy.id}
+                className="flex items-center justify-between rounded-lg border border-slate-200 p-3 text-sm"
+              >
+                <div className="flex items-center gap-3 min-w-0 flex-1">
+                  {/* Status dot */}
+                  <span
+                    className={`w-3 h-3 rounded-full shrink-0 ${
+                      copy.status === 'available'
+                        ? 'bg-emerald-500'
+                        : copy.status === 'checked_out'
+                        ? 'bg-red-500'
+                        : 'bg-amber-500'
+                    }`}
+                  />
+                  <div className="min-w-0">
+                    <span className="font-medium text-slate-900">Copy</span>{' '}
+                    <span className="text-slate-500">
+                      #{copies.indexOf(copy) + 1}
+                    </span>
+                    {copy.barcode && (
+                      <span className="text-slate-400 ml-2 font-mono text-xs">
+                        {copy.barcode}
+                      </span>
+                    )}
+                    {copy.location_name && (
+                      <span className="text-slate-400 ml-2">
+                        at {copy.location_name}
+                      </span>
+                    )}
+                  </div>
+                </div>
+                <div className="flex items-center gap-2 shrink-0">
+                  <span className={`rounded-md px-2 py-0.5 text-xs font-medium ${CONDITION_COLORS[copy.condition] || 'bg-slate-100 text-slate-700'}`}>
+                    {copy.condition}
+                  </span>
+                  <span
+                    className={`rounded-md px-2.5 py-0.5 text-xs font-medium ${
+                      copy.status === 'available'
+                        ? 'bg-emerald-100 text-emerald-700'
+                        : copy.status === 'checked_out'
+                        ? 'bg-red-100 text-red-700'
+                        : 'bg-amber-100 text-amber-700'
+                    }`}
+                  >
+                    {copy.status === 'available'
+                      ? 'Available'
+                      : copy.status === 'checked_out'
+                      ? 'Checked Out'
+                      : 'On Hold'}
+                  </span>
+                </div>
+              </li>
+            ))}
+          </ul>
+        )}
+
+        {/* Legend */}
+        {totalCopies > 0 && (
+          <div className="flex items-center gap-4 pt-2 border-t border-slate-100 text-xs text-slate-400">
+            <span className="flex items-center gap-1">
+              <span className="w-2 h-2 rounded-full bg-emerald-500"></span> Available
+            </span>
+            <span className="flex items-center gap-1">
+              <span className="w-2 h-2 rounded-full bg-red-500"></span> Checked Out
+            </span>
+            <span className="flex items-center gap-1">
+              <span className="w-2 h-2 rounded-full bg-amber-500"></span> On Hold
+            </span>
+          </div>
+        )}
+      </div>
+
+      {/* Staff: Edit link (keep existing admin interface) */}
+      {isStaff && (
+        <div className="flex gap-3">
+          <Link
+            href={`/books/${bookId}/edit`}
+            className="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-indigo-700 transition"
+          >
+            Edit Book Details
+          </Link>
+        </div>
+      )}
+    </div>
+  );
 }
