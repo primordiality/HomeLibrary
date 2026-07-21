@@ -11,6 +11,9 @@ export default function AdminUsers() {
   const [users, setUsers] = useState<AdminUserRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [showModal, setShowModal] = useState(false);
+  const [showRoleModal, setShowRoleModal] = useState(false);
+  const [roleModalUser, setRoleModalUser] = useState<{ id: string; name: string } | null>(null);
+  const [newRole, setNewRole] = useState<Profile["role"]>("patron");
   const [modalName, setModalName] = useState("");
   const [modalEmail, setModalEmail] = useState("");
   const [modalPassword, setModalPassword] = useState("");
@@ -19,6 +22,7 @@ export default function AdminUsers() {
   const [error, setError] = useState<string | null>(null);
   const [toast, setToast] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
+  const [changingRole, setChangingRole] = useState(false);
   const { user } = useAuth();
   const selfId = user?.id;
   const adminCount = users.filter(u => u.role === "system_admin").length;
@@ -167,6 +171,35 @@ export default function AdminUsers() {
     }
   };
 
+  const handleRoleChange = async () => {
+    setError(null);
+    if (!roleModalUser) return;
+
+    setChangingRole(true);
+    try {
+      const { error } = await supabase
+        .from("profiles")
+        .update({ role: newRole })
+        .eq("id", roleModalUser.id);
+
+      if (error) {
+        setError(`Failed to update role: ${error.message}`);
+        setChangingRole(false);
+        return;
+      }
+
+      showToast(`${roleModalUser.name || "User"} role changed to ${newRole.replace("_", " ")}.`);
+      setShowRoleModal(false);
+      setRoleModalUser(null);
+      setNewRole("patron");
+      await loadUsers();
+    } catch (e) {
+      setError("Failed to update role. Check your connection.");
+    } finally {
+      setChangingRole(false);
+    }
+  };
+
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
@@ -246,27 +279,16 @@ export default function AdminUsers() {
                         {u.created_at ? new Date(u.created_at).toLocaleDateString() : "—"}
                       </td>
                       <td className="px-4 py-3 text-right space-x-2">
-                        {!isSysAdmin && !isSelf && (
+                        {!isSelf && (
                           <button
-                            onClick={async () => {
-                              try {
-                                const { error } = await supabase
-                                  .from("profiles")
-                                  .update({ role: "system_admin" })
-                                  .eq("id", u.id);
-                                if (error) {
-                                  setError(`Failed to promote: ${error.message}`);
-                                  return;
-                                }
-                                showToast(`${u.name || "User"} promoted to system admin.`);
-                                await loadUsers();
-                              } catch (e) {
-                                setError("Failed to promote user.");
-                              }
+                            onClick={() => {
+                              setRoleModalUser({ id: u.id, name: u.name || "" });
+                              setNewRole(u.role || "patron");
+                              setShowRoleModal(true);
                             }}
-                            className="text-xs font-medium text-purple-700 bg-purple-50 hover:bg-purple-100 px-2.5 py-1 rounded border border-purple-200 transition"
+                            className="text-xs font-medium text-indigo-700 bg-indigo-50 hover:bg-indigo-100 px-2.5 py-1 rounded border border-indigo-200 transition"
                           >
-                            Promote
+                            Change Role
                           </button>
                         )}
                         {isSelf && (
@@ -387,6 +409,72 @@ export default function AdminUsers() {
                 disabled={creating}
               >
                 {creating ? "Creating…" : "Create User"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Change Role Modal */}
+      {showRoleModal && roleModalUser && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
+          <div className="w-full max-w-sm bg-white rounded-xl shadow-xl p-6 space-y-4">
+            <div className="flex items-center justify-between">
+              <h2 className="text-lg font-semibold text-slate-900">Change Role</h2>
+              <button
+                onClick={() => {
+                  setShowRoleModal(false);
+                  setRoleModalUser(null);
+                }}
+                className="text-slate-400 hover:text-slate-600"
+              >
+                <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+
+            <p className="text-sm text-slate-600">
+              Change role for <span className="font-medium text-slate-900">{roleModalUser.name || roleModalUser.id}</span>?
+            </p>
+
+            <div>
+              <label className="block text-sm font-medium text-slate-700 mb-1">New Role</label>
+              <select
+                value={newRole}
+                onChange={(e) => setNewRole(e.target.value as Profile["role"])}
+                className="block w-full px-3 py-2 border border-slate-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+              >
+                <option value="patron">Patron</option>
+                <option value="librarian">Librarian</option>
+                <option value="library_owner">Library Owner</option>
+                <option value="system_admin">System Admin</option>
+              </select>
+            </div>
+
+            {error && (
+              <div className="p-2 text-sm text-red-700 bg-red-50 rounded-lg">
+                {error}
+              </div>
+            )}
+
+            <div className="flex gap-3 pt-2">
+              <button
+                onClick={() => {
+                  setShowRoleModal(false);
+                  setRoleModalUser(null);
+                }}
+                className="flex-1 px-4 py-2 text-sm font-medium text-slate-700 bg-white border border-slate-300 rounded-lg hover:bg-slate-50 transition"
+                disabled={changingRole}
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleRoleChange}
+                className="flex-1 px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded-lg hover:bg-blue-700 transition disabled:opacity-50"
+                disabled={changingRole}
+              >
+                {changingRole ? "Updating…" : "Update Role"}
               </button>
             </div>
           </div>
