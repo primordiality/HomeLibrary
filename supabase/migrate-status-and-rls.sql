@@ -5,7 +5,34 @@
 -- ════════════════════════════════════════════════════════════
 
 -- ════════════════════════════════════════════════════════════
--- 1. Helper functions for RLS (SECURITY DEFINER avoids recursion)
+-- 1. Add status column to profiles (if missing)
+--    Must be before helper functions that reference it
+-- ════════════════════════════════════════════════════════════
+
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_schema = 'public' AND table_name = 'profiles' AND column_name = 'status'
+  ) THEN
+    ALTER TABLE profiles ADD COLUMN status text DEFAULT 'pending';
+    -- Add constraint after the column exists
+    ALTER TABLE profiles ADD CONSTRAINT profiles_status_check
+      CHECK (status IN ('pending', 'active', 'suspended'));
+    -- Backfill existing profiles
+    UPDATE profiles SET status = 'active' WHERE status IS NULL;
+    -- Make NOT NULL now that we've backfilled
+    ALTER TABLE profiles ALTER COLUMN status SET NOT NULL;
+    ALTER TABLE profiles ALTER COLUMN status SET DEFAULT 'pending';
+  END IF;
+END
+$$;
+
+-- Partial index for pending lookup
+CREATE INDEX IF NOT EXISTS idx_profiles_status ON profiles (status) WHERE status = 'pending';
+
+-- ════════════════════════════════════════════════════════════
+-- 2. Helper functions for RLS (SECURITY DEFINER avoids recursion)
 -- ════════════════════════════════════════════════════════════
 
 CREATE OR REPLACE FUNCTION is_system_admin()
@@ -42,32 +69,6 @@ AS $$
     WHERE id = auth.uid() AND status IN ('active', 'pending')
   );
 $$;
-
--- ════════════════════════════════════════════════════════════
--- 2. Add status column to profiles (if missing)
--- ════════════════════════════════════════════════════════════
-
-DO $$
-BEGIN
-  IF NOT EXISTS (
-    SELECT 1 FROM information_schema.columns
-    WHERE table_schema = 'public' AND table_name = 'profiles' AND column_name = 'status'
-  ) THEN
-    ALTER TABLE profiles ADD COLUMN status text DEFAULT 'pending';
-    -- Add constraint after the column exists
-    ALTER TABLE profiles ADD CONSTRAINT profiles_status_check
-      CHECK (status IN ('pending', 'active', 'suspended'));
-    -- Backfill existing profiles
-    UPDATE profiles SET status = 'active' WHERE status IS NULL;
-    -- Make NOT NULL now that we've backfilled
-    ALTER TABLE profiles ALTER COLUMN status SET NOT NULL;
-    ALTER TABLE profiles ALTER COLUMN status SET DEFAULT 'pending';
-  END IF;
-END
-$$;
-
--- Partial index for pending lookup
-CREATE INDEX IF NOT EXISTS idx_profiles_status ON profiles (status) WHERE status = 'pending';
 
 -- ════════════════════════════════════════════════════════════
 -- 3. Add library_settings table (if missing)
