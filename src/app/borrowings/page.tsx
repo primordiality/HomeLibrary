@@ -30,11 +30,21 @@ export default function BorrowingsPage() {
   const [returnConfirm, setReturnConfirm] = useState<string | null>(null);
   const [returningId, setReturningId] = useState<string | null>(null);
 
+  // Hold tab
+  const [activeTab, setActiveTab] = useState<'borrows' | 'holds'>('borrows');
+  const [holds, setHolds] = useState<any[]>([]);
+  const [holding, setHolding] = useState(false);
+  const [holdingAction, setHoldingAction] = useState<Record<string, boolean>>({});
+
+  // Hold queues for position calculation
+  const [bookHoldQueues, setBookHoldQueues] = useState<Record<string, any[]>>({});
+
   useEffect(() => {
     loadPatrons();
     loadBorrows();
-     // eslint-disable-next-line react-hooks/exhaustive-deps -- one-shot load
-     }, []);
+    loadHolds();
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- one-shot load
+    }, []);
 
   async function loadPatrons() {
     try {
@@ -91,6 +101,30 @@ export default function BorrowingsPage() {
       setLoading(false); 
      }
    }
+
+  async function loadHolds() {
+    try {
+      const { data, error } = await supabase
+        .from('holds')
+        .select('*')
+        .in('status', ['waiting', 'accepted'])
+        .order('created_at', { ascending: true });
+      
+      if (error) throw new Error(error.message);
+      const activeHolds = (data ?? []).filter((h: any) => h.status === 'waiting' || h.status === 'accepted');
+      setHolds(activeHolds);
+
+      // Build queue per book for position calculation
+      const queueMap: Record<string, any[]> = {};
+      for (const h of activeHolds) {
+        if (!queueMap[h.book_id]) queueMap[h.book_id] = [];
+        queueMap[h.book_id].push(h);
+      }
+      setBookHoldQueues(queueMap);
+    } catch (e: any) {
+      console.error('Failed to load holds:', e.message);
+    }
+  }
 
   async function handleReturn(borrowId: string) {
     try {
@@ -196,13 +230,59 @@ export default function BorrowingsPage() {
     }
   }
 
-  function getBookTitleForCopy(copyId: string): string {
+  // Hold management actions
+  async function handleMarkReady(holdId: string) {
+    setHoldingAction(prev => ({ ...prev, [holdId]: true }));
+    try {
+      const { error } = await supabase
+        .from('holds')
+        .update({ status: 'accepted', updated_at: new Date().toISOString() })
+        .eq('id', holdId);
+      
+      if (error) throw new Error(error.message);
+      
+      // Refresh holds
+      loadHolds();
+    } catch (e: any) {
+      alert('Failed to mark hold as ready: ' + e.message);
+    } finally {
+      setHoldingAction(prev => ({ ...prev, [holdId]: false }));
+    }
+  }
+
+  async function handleCancelHold(holdId: string) {
+    if (!window.confirm('Cancel this hold?')) return;
+    setHoldingAction(prev => ({ ...prev, [holdId]: true }));
+    try {
+      const { error } = await supabase
+        .from('holds')
+        .update({ status: 'cancelled', updated_at: new Date().toISOString() })
+        .eq('id', holdId);
+      
+      if (error) throw new Error(error.message);
+      
+      // Refresh holds
+      loadHolds();
+    } catch (e: any) {
+      alert('Failed to cancel hold: ' + e.message);
+    } finally {
+      setHoldingAction(prev => ({ ...prev, [holdId]: false }));
+    }
+  }
+
+  function copyBookIdFromCopyId(copyId: string): string | null {
     const borrow = activeBorrows.find((b: any) => b.copy_id === copyId);
-    if (!borrow) return 'Unknown';
-    // Need to look up book_id from book_copies
-    // We already loaded booksMap via book_id
-    // For now, we'll compute from borrows data
-    return '—';
+    if (!borrow) {
+      // Check if this copy appears in borrows at all
+      for (const b of activeBorrows) {
+        if (b.copy_id === copyId) {
+          return null;
+        }
+      }
+    }
+    // Look up from borrows to find book_id via book_copies
+    const bookIdFromBorrow = copyBookIdCache[copyId];
+    return bookIdFromBorrow || null;
   }
 
   // Helper: get book title by looking at copy's book_id
@@ -323,6 +403,61 @@ export default function BorrowingsPage() {
   const today = new Date().toISOString().split('T')[0];
   const overdueCount = displayLoans.filter((l: any) => l.due_date && l.due_date < today).length;
 
+  // Hold position helper
+  function getHoldPosition(hold: any): number {
+    const queue = bookHoldQueues[hold.book_id] || [];
+    return queue.findIndex((h: any) => h.id === hold.id) + 1;
+  }
+
+  // Are there copies available for a book? (any copy not checked out)
+  function copiesAvailableForBook(bookId: string): boolean {
+    if (!copiesByBook[bookId]) return false;
+    const checkedOutCopyIds = new Set(displayLoans.filter(l => {
+      const bid = copyBookIdCache[l.copy_id];
+      return bid === bookId;
+    }).map(l => l.copy_id));
+    return copiesByBook[bookId].some((c: any) => !checkedOutCopyIds.has(c.id));
+  }
+
+  // Build copy→book_id cache for hold rows
+  const copiesByBook: Record<string, any[]> = {};
+  useEffect(() => {
+    async function loadCopies() {
+      const bookIds = [...new Set(holds.map((h: any) => h.book_id))];
+      if (bookIds.length === 0) return;
+      const { data: copies } = await supabase
+        .from('book_copies')
+        .select('id, book_id')
+        .in('book_id', bookIds);
+      if (copies) {
+        for (const c of copies) {
+          if (!copiesByBook[c.book_id]) copiesByBook[c.book_id] = [];
+          copiesByBook[c.book_id].push(c);
+        }
+      }
+    }
+    loadCopies();
+  }, [holds]);
+
+  // Cache copiesByBook to avoid re-render issues
+  const [resolvedCopiesByBook, setResolvedCopiesByBook] = useState<Record<string, any[]>>({});
+  useEffect(() => {
+    if (Object.keys(copiesByBook).length > 0) {
+      // Deep clone to set state
+      setResolvedCopiesByBook(JSON.parse(JSON.stringify(copiesByBook)));
+    }
+  }, [JSON.stringify(copiesByBook)]);
+
+  function copiesAvailableForBookChecked(bookId: string): boolean {
+    const copies = resolvedCopiesByBook[bookId] || [];
+    if (copies.length === 0) return false;
+    const checkedOutCopyIds = new Set(displayLoans.filter(l => {
+      const bid = copyBookIdCache[l.copy_id];
+      return bid === bookId;
+    }).map(l => l.copy_id));
+    return copies.some((c: any) => !checkedOutCopyIds.has(c.id));
+  }
+
   return (
        <div className="space-y-6">
          {/* Header */}
@@ -359,6 +494,30 @@ export default function BorrowingsPage() {
            + Check Out Book
          </button>
 
+         {/* Tab navigation for borrows vs holds */}
+         <div className="flex rounded-lg border border-slate-200 overflow-hidden w-fit">
+           <button
+             onClick={() => setActiveTab('borrows')}
+             className={`px-4 py-1.5 text-sm font-medium transition ${
+               activeTab === 'borrows'
+                 ? 'bg-indigo-600 text-white'
+                 : 'bg-white text-slate-600 hover:bg-slate-50'
+             }`}
+           >
+             Active Loans
+           </button>
+           <button
+             onClick={() => setActiveTab('holds')}
+             className={`px-4 py-1.5 text-sm font-medium transition ${
+               activeTab === 'holds'
+                 ? 'bg-indigo-600 text-white'
+                 : 'bg-white text-slate-600 hover:bg-slate-50'
+             }`}
+           >
+             Holds Queue
+           </button>
+         </div>
+
          {/* Patron filter + search */}
          <div className="flex flex-wrap gap-3 items-center">
            <select 
@@ -383,113 +542,238 @@ export default function BorrowingsPage() {
            />
          </div>
 
-         {/* Active Loans Table */}
-         {loading ? (
-             <p className="text-sm text-slate-500">Loading...</p>
-         ) : displayLoans.length > 0 ? (
+         {/* BORROWS TAB */}
+         {activeTab === 'borrows' && (
+           loading ? (
+               <p className="text-sm text-slate-500">Loading...</p>
+           ) : displayLoans.length > 0 ? (
+               <div className="rounded-xl border bg-white shadow-sm overflow-x-auto">
+                 <table className="w-full text-sm">
+                   <thead className="border-b bg-slate-50">
+                     <tr className="text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
+                       <th className="py-3 pl-4">Book</th>
+                       <th className="py-3">Patron</th>
+                       <th className="py-3">Checkout Date</th>
+                       <th className="py-3">Due Date</th>
+                       <th className="py-3 text-right">Action</th>
+                     </tr>
+                   </thead>
+                   <tbody className="divide-y">
+                     {displayLoans.map((loan: any) => {
+                      const isOverdue = !!loan.due_date && today > loan.due_date;
+                      const daysLeft = loan.due_date ? (() => {
+                        const due = new Date(loan.due_date);
+                        const now = new Date();
+                        now.setHours(0,0,0,0);
+                        due.setHours(0,0,0,0);
+                        return Math.ceil((due.getTime() - now.getTime()) / (1000*60*60*24));
+                      })() : null;
+                      return (
+                         <tr key={loan.id} className={`hover:bg-slate-50 ${isOverdue ? 'bg-red-50/50' : ''}`}>
+                           <td className="py-3 pl-4 whitespace-nowrap">
+                             <span className={`font-medium ${isOverdue ? 'text-red-700' : 'text-slate-900'}`}>
+                               {copyTitle(loan.copy_id)}
+                             </span>
+                           </td>
+                           <td className="py-3 pl-4 whitespace-nowrap font-medium text-slate-900">
+                             {patronMap[loan.patron_user_id] || 'Unknown'}
+                           </td>
+                           <td className="py-3 text-slate-600">
+                             <span className={isOverdue ? "text-red-600 font-medium" : ""}>
+                               {new Date(loan.checkout_date).toLocaleDateString()}
+                             </span>
+                           </td>
+                           <td className="py-3">
+                             {loan.due_date ? (
+                               <span className={isOverdue ? "text-red-600 font-medium" : "text-slate-600"}>
+                                 {new Date(loan.due_date).toLocaleDateString()}
+                               </span>
+                             ) : (
+                               <span className="text-slate-400">No due date set</span>
+                             )}
+                             <div className={`text-xs mt-0.5 ${isOverdue ? 'text-red-500 font-medium' : 'text-slate-400'}`}>
+                               {daysLeft !== null ? (daysLeft < 0 ? `${Math.abs(daysLeft)}d overdue` : daysLeft === 0 ? 'Due today' : `${daysLeft}d remaining`) : ''}
+                             </div>
+                           </td>
+                           <td className="py-3 text-right space-x-2">
+                             {isOverdue && (
+                               <button 
+                                 onClick={() => alert('This patron has an overdue loan! Please contact them to return.')}
+                                   className="bg-red-100 px-3 py-1 text-xs font-medium rounded hover:bg-red-200 mr-2"
+                               >
+                                 Overdue
+                               </button>
+                             )}
+                             {returnConfirm === loan.id ? (
+                               <div className="flex items-center gap-1">
+                                 <button 
+                                   onClick={() => handleReturn(loan.id)}
+                                   className="bg-green-600 px-2 py-1 text-xs font-medium rounded text-white hover:bg-green-700"
+                                 >
+                                   Confirm
+                                 </button>
+                                 <button 
+                                   onClick={() => { setReturnConfirm(null); setReturningId(null); }}
+                                   className="bg-slate-200 px-2 py-1 text-xs font-medium rounded text-slate-700 hover:bg-slate-300"
+                                 >
+                                   Cancel
+                                 </button>
+                               </div>
+                             ) : (
+                               <button 
+                                 onClick={() => { setReturnConfirm(loan.id); setReturningId(loan.id); }}
+                                 className="text-green-600 hover:text-green-800 text-sm font-medium"
+                               >
+                                 Mark Returned
+                               </button>
+                             )}
+                           </td>
+                         </tr>
+                      );
+                    })}
+                   </tbody>
+                 </table>
+               </div>
+           ) : (
+               <div className="rounded-xl border border-dashed border-slate-300 p-12 text-center">
+                 {patronsAll.length > 0 ? (
+                   <p className="text-sm font-medium text-slate-600 mb-2">No active borrows at this time.</p>
+                 ) : (
+                     <>
+                       <p className="text-sm font-medium text-slate-600">No borrows found</p>
+                       <p className="text-sm text-slate-500">Check back when patrons have active loans</p>
+                     </>
+                 )}
+               </div>
+           )
+         )}
+
+         {/* HOLDS TAB */}
+         {activeTab === 'holds' && (
+           holds.length > 0 ? (
              <div className="rounded-xl border bg-white shadow-sm overflow-x-auto">
                <table className="w-full text-sm">
                  <thead className="border-b bg-slate-50">
                    <tr className="text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
-                     <th className="py-3 pl-4">Book</th>
-                     <th className="py-3">Patron</th>
-                     <th className="py-3">Checkout Date</th>
-                     <th className="py-3">Due Date</th>
-                     <th className="py-3 text-right">Action</th>
+                     <th className="py-3 pl-4">Patron</th>
+                     <th className="py-3">Book</th>
+                     <th className="py-3 hidden sm:table-cell">Library</th>
+                     <th className="py-3 hidden sm:table-cell">Copy Available?</th>
+                     <th className="py-3">Position</th>
+                     <th className="py-3">Status</th>
+                     <th className="py-3 hidden md:table-cell">Placed On</th>
+                     <th className="py-3 text-right">Actions</th>
                    </tr>
                  </thead>
                  <tbody className="divide-y">
-                   {displayLoans.map((loan: any) => {
-                    const isOverdue = !!loan.due_date && today > loan.due_date;
-                    const daysLeft = loan.due_date ? (() => {
-                      const due = new Date(loan.due_date);
-                      const now = new Date();
-                      now.setHours(0,0,0,0);
-                      due.setHours(0,0,0,0);
-                      return Math.ceil((due.getTime() - now.getTime()) / (1000*60*60*24));
-                    })() : null;
-                    return (
-                       <tr key={loan.id} className={`hover:bg-slate-50 ${isOverdue ? 'bg-red-50/50' : ''}`}>
-                         <td className="py-3 pl-4 whitespace-nowrap">
-                           <span className={`font-medium ${isOverdue ? 'text-red-700' : 'text-slate-900'}`}>
-                             {copyTitle(loan.copy_id)}
-                           </span>
-                         </td>
+                   {holds.map((hold: any) => {
+                     const position = getHoldPosition(hold);
+                     const patronName = patronMap[hold.patron_user_id] || 'Unknown';
+                     const bookInfo = booksMap[hold.book_id];
+                     const bookTitleStr = bookInfo?.title || 'Unknown Book';
+                     const hasCopyAvailable = copiesAvailableForBookChecked(hold.book_id);
+
+                     return (
+                       <tr key={hold.id} className="hover:bg-slate-50">
                          <td className="py-3 pl-4 whitespace-nowrap font-medium text-slate-900">
-                           {patronMap[loan.patron_user_id] || 'Unknown'}
-                         </td>
-                         <td className="py-3 text-slate-600">
-                           <span className={isOverdue ? "text-red-600 font-medium" : ""}>
-                             {new Date(loan.checkout_date).toLocaleDateString()}
-                           </span>
+                           {patronName}
                          </td>
                          <td className="py-3">
-                           {loan.due_date ? (
-                             <span className={isOverdue ? "text-red-600 font-medium" : "text-slate-600"}>
-                               {new Date(loan.due_date).toLocaleDateString()}
+                           <Link
+                             href={`/catalog/${hold.book_id}`}
+                             className="text-indigo-600 hover:text-indigo-800 text-sm"
+                           >
+                             {bookTitleStr}
+                           </Link>
+                         </td>
+                         <td className="py-3 text-slate-600 hidden sm:table-cell">
+                           {hold.library_id || '—'}
+                         </td>
+                         <td className="py-3 hidden sm:table-cell">
+                           {hasCopyAvailable ? (
+                             <span className="inline-flex items-center rounded-full bg-green-100 px-2.5 py-0.5 text-xs font-medium text-green-700">
+                               Yes
                              </span>
                            ) : (
-                             <span className="text-slate-400">No due date set</span>
+                             <span className="inline-flex items-center rounded-full bg-slate-100 px-2.5 py-0.5 text-xs font-medium text-slate-500">
+                               No
+                             </span>
                            )}
-                           <div className={`text-xs mt-0.5 ${isOverdue ? 'text-red-500 font-medium' : 'text-slate-400'}`}>
-                             {daysLeft !== null ? (daysLeft < 0 ? `${Math.abs(daysLeft)}d overdue` : daysLeft === 0 ? 'Due today' : `${daysLeft}d remaining`) : ''}
-                           </div>
                          </td>
-                         <td className="py-3 text-right space-x-2">
-                           {isOverdue && (
-                             <button 
-                               onClick={() => alert('This patron has an overdue loan! Please contact them to return.')}
-                                 className="bg-red-100 px-3 py-1 text-xs font-medium rounded hover:bg-red-200 mr-2"
-                             >
-                               Overdue
-                             </button>
+                         <td className="py-3">
+                           {hold.status === 'waiting' ? (
+                             <span className="font-medium text-amber-700">#{position}</span>
+                           ) : (
+                             <span className="text-green-700">Accepted</span>
                            )}
-                           {returnConfirm === loan.id ? (
-                             <div className="flex items-center gap-1">
-                               <button 
-                                 onClick={() => handleReturn(loan.id)}
-                                 className="bg-green-600 px-2 py-1 text-xs font-medium rounded text-white hover:bg-green-700"
+                         </td>
+                         <td className="py-3">
+                           {hold.status === 'waiting' ? (
+                             <span className="inline-flex items-center rounded-full bg-amber-100 px-2.5 py-0.5 text-xs font-medium text-amber-700">
+                               Waiting
+                             </span>
+                           ) : hold.status === 'accepted' ? (
+                             <span className="inline-flex items-center rounded-full bg-green-100 px-2.5 py-0.5 text-xs font-medium text-green-700">
+                               Ready to pick up
+                             </span>
+                           ) : (
+                             <span className="inline-flex items-center rounded-full bg-slate-100 px-2.5 py-0.5 text-xs font-medium text-slate-500">
+                               Cancelled
+                             </span>
+                           )}
+                         </td>
+                         <td className="py-3 text-slate-600 hidden md:table-cell">
+                           {new Date(hold.created_at).toLocaleDateString()}
+                         </td>
+                         <td className="py-3 text-right">
+                           {hold.status === 'waiting' ? (
+                             <div className="flex items-center justify-end gap-2">
+                               <button
+                                 onClick={() => handleMarkReady(hold.id)}
+                                 disabled={holdingAction[hold.id]}
+                                 className="bg-green-600 px-2.5 py-1 text-xs font-medium rounded text-white hover:bg-green-700 transition disabled:opacity-50"
                                >
-                                 Confirm
+                                 {holdingAction[hold.id] ? 'Setting...' : 'Mark Ready'}
                                </button>
-                               <button 
-                                 onClick={() => { setReturnConfirm(null); setReturningId(null); }}
-                                 className="bg-slate-200 px-2 py-1 text-xs font-medium rounded text-slate-700 hover:bg-slate-300"
+                               <button
+                                 onClick={() => handleCancelHold(hold.id)}
+                                 disabled={holdingAction[hold.id]}
+                                 className="bg-red-600 px-2.5 py-1 text-xs font-medium rounded text-white hover:bg-red-700 transition disabled:opacity-50"
                                >
-                                 Cancel
+                                 {holdingAction[hold.id] ? 'Cancelling...' : 'Cancel'}
                                </button>
                              </div>
-                           ) : (
-                             <button 
-                               onClick={() => { setReturnConfirm(loan.id); setReturningId(loan.id); }}
-                               className="text-green-600 hover:text-green-800 text-sm font-medium"
+                           ) : hold.status === 'accepted' ? (
+                             <button
+                               onClick={() => handleCancelHold(hold.id)}
+                               disabled={holdingAction[hold.id]}
+                               className="bg-red-600 px-2.5 py-1 text-xs font-medium rounded text-white hover:bg-red-700 transition disabled:opacity-50"
                              >
-                               Mark Returned
+                               {holdingAction[hold.id] ? 'Cancelling...' : 'Cancel'}
                              </button>
+                           ) : (
+                             <span className="text-xs text-slate-400">—</span>
                            )}
                          </td>
                        </tr>
-                    );
+                     );
                    })}
                  </tbody>
                </table>
              </div>
-         ) : (
+           ) : (
              <div className="rounded-xl border border-dashed border-slate-300 p-12 text-center">
-               {patronsAll.length > 0 ? (
-                 <p className="text-sm font-medium text-slate-600 mb-2">No active borrows at this time.</p>
-               ) : (
-                   <>
-                     <p className="text-sm font-medium text-slate-600">No borrows found</p>
-                     <p className="text-sm text-slate-500">Check back when patrons have active loans</p>
-                   </>
-               )}
+               <p className="text-sm font-medium text-slate-600">No active holds</p>
+               <p className="text-sm text-slate-500">
+                 Holds placed by patrons will appear here.
+               </p>
              </div>
+           )
          )}
 
          {/* Manage Patrons Link */}
          <div className="flex justify-between items-center">
-           <Link href="/patrons" className="text-sm font-medium text-indigo-600 hover:text-indigo-800">&larr; Back to Patrons</Link>
+           <Link href="/patrons" className="text-sm font-medium text-indigo-600 hover:text-indigo-800">{activeTab === 'borrows' ? '<-- Back to Patrons' : '<-- Back to Patrons'}</Link>
          </div>
 
          {/* Checkout Modal */}

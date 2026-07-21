@@ -38,6 +38,7 @@ export default function BookDetailPage({ params }: { params: { bookId: string } 
   const [placeHoldLoading, setPlaceHoldLoading] = useState(false);
   const [placeHoldError, setPlaceHoldError] = useState<string | null>(null);
   const [placeHoldSuccess, setPlaceHoldSuccess] = useState<string | null>(null);
+  const [holdPosition, setHoldPosition] = useState<number | null>(null);
 
   // Borrow state
   const [borrowLoading, setBorrowLoading] = useState(false);
@@ -81,7 +82,7 @@ export default function BookDetailPage({ params }: { params: { bookId: string } 
 
       // Load holds for this book
       const { data: holdsData } = await supabase
-        .from('hold_requests')
+        .from('holds')
         .select('*')
         .eq('book_id', bookId)
         .in('status', ['waiting', 'accepted']);
@@ -155,6 +156,7 @@ export default function BookDetailPage({ params }: { params: { bookId: string } 
     setPlaceHoldLoading(true);
     setPlaceHoldError(null);
     setPlaceHoldSuccess(null);
+    setHoldPosition(null);
     try {
       // Pick the library with the most copies for this book
       const libraryCounts: Record<string, number> = {};
@@ -164,7 +166,7 @@ export default function BookDetailPage({ params }: { params: { bookId: string } 
       const targetLibrary = Object.entries(libraryCounts).sort((a, b) => b[1] - a[1])[0]?.[0] || '';
 
       const { error } = await supabase
-        .from('hold_requests')
+        .from('holds')
         .insert({
           patron_user_id: user.id,
           book_id: bookId,
@@ -175,14 +177,32 @@ export default function BookDetailPage({ params }: { params: { bookId: string } 
       if (error) {
         setPlaceHoldError(error.message);
       } else {
-        setPlaceHoldSuccess('Hold placed successfully!');
-        // Refresh holds list
+        // Calculate position: count waiting holds for this book + library created before this one
+        // We need to refresh holds and find our position
         const { data: refreshedHolds } = await supabase
-          .from('hold_requests')
+          .from('holds')
           .select('*')
           .eq('book_id', bookId)
-          .in('status', ['waiting', 'accepted']);
-        if (refreshedHolds) setHolds(refreshedHolds);
+          .eq('library_id', targetLibrary)
+          .eq('status', 'waiting')
+          .order('created_at', { ascending: true });
+        
+        if (refreshedHolds) {
+          setHolds(refreshedHolds);
+          const myPosition = refreshedHolds.findIndex((h: any) => h.patron_user_id === user.id);
+          if (myPosition >= 0) {
+            setHoldPosition(myPosition + 1);
+            setPlaceHoldSuccess(`Hold placed. You are #${myPosition + 1} in the queue.`);
+          } else {
+            setPlaceHoldSuccess('Hold placed successfully!');
+            setHoldPosition(1);
+          }
+        } else {
+          setPlaceHoldSuccess('Hold placed successfully!');
+          setHoldPosition(1);
+        }
+        // Hide success message after 5 seconds
+        setTimeout(() => setPlaceHoldSuccess(null), 5000);
       }
     } catch (err) {
       setPlaceHoldError('Failed to place hold. Please try again.');
@@ -276,6 +296,11 @@ export default function BookDetailPage({ params }: { params: { bookId: string } 
     (b: any) => b.patron_user_id === user.id && !b.return_date
   );
 
+  // Check if user already has an active hold for this book
+  const userHasHold = user && holds.some(
+    (h: any) => h.patron_user_id === user.id && (h.status === 'waiting' || h.status === 'accepted')
+  );
+
   // Get an available copy for the borrow button
   const availableCopy = copiesWithStatus.find((c) => c.status === 'available');
 
@@ -353,6 +378,21 @@ export default function BookDetailPage({ params }: { params: { bookId: string } 
         </div>
       )}
 
+      {/* Already have a hold */}
+      {isPatron && user && userHasHold && !userHasBook && (
+        <div className="rounded-xl border border-amber-200 bg-amber-50 p-4">
+          <p className="text-sm font-medium text-amber-800">
+            You already have a hold on this book.
+          </p>
+          <Link
+            href="/patrons/dashboard"
+            className="mt-2 inline-block text-sm text-indigo-600 hover:text-indigo-800 font-medium"
+          >
+            View your holds →
+          </Link>
+        </div>
+      )}
+
       {/* Full Book Info */}
       <div className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm space-y-4">
         <h2 className="text-lg font-semibold text-slate-900">Book Details</h2>
@@ -410,7 +450,7 @@ export default function BookDetailPage({ params }: { params: { bookId: string } 
         </div>
 
         {/* Place Hold button - patrons only when all checked out */}
-        {isPatron && allCheckedOut && (
+        {isPatron && allCheckedOut && !userHasHold && (
           <div>
             {!user ? (
               <div className="rounded-lg bg-slate-50 border border-slate-200 p-4 text-center">
@@ -436,11 +476,24 @@ export default function BookDetailPage({ params }: { params: { bookId: string } 
                 {placeHoldSuccess && (
                   <p className="mt-2 text-sm text-green-600">{placeHoldSuccess}</p>
                 )}
+                {holdPosition !== null && holdPosition > 1 && (
+                  <p className="mt-1 text-xs text-slate-500">
+                    There are {holdPosition - 1} person{holdPosition - 1 !== 1 ? 's' : ''} ahead of you in the queue.
+                  </p>
+                )}
                 {placeHoldError && (
                   <p className="mt-2 text-sm text-red-600">{placeHoldError}</p>
                 )}
               </div>
             )}
+          </div>
+        )}
+
+        {/* Already have a hold notice */}
+        {isPatron && user && userHasHold && (
+          <div className="rounded-lg bg-amber-50 border border-amber-200 p-4">
+            <p className="text-sm text-amber-800 font-medium">You have a hold on this book</p>
+            <p className="text-xs text-amber-600 mt-1">Check your dashboard to see the status of your hold.</p>
           </div>
         )}
 

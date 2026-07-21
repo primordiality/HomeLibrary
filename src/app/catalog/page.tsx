@@ -4,6 +4,7 @@ import { useState, useEffect, Suspense } from 'react';
 import Link from 'next/link';
 import { useSearchParams, useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabase/client';
+import { useAuth } from '@/contexts/AuthContext';
 import AddBookDialog from '@/components/add-book-dialog';
 
 interface Availability {
@@ -15,6 +16,7 @@ interface Availability {
 function CatalogContent() {
   const searchParams = useSearchParams();
   const router = useRouter();
+  const { user } = useAuth();
   const activeLibId = searchParams.get('library') ?? '';
 
   const [books, setBooks] = useState([]);
@@ -24,6 +26,7 @@ function CatalogContent() {
   const [loading, setLoading] = useState(true);
   const [libraries, setLibraries] = useState([]);
   const [showFilters, setShowFilters] = useState(false);
+  const [userHoldsByBook, setUserHoldsByBook] = useState<Record<string, boolean>>({});
 
   // Load libraries once on mount
   useEffect(() => {
@@ -39,6 +42,33 @@ function CatalogContent() {
     loadCatalog(activeLibId, searchQuery);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeLibId, searchQuery]);
+
+  // Load user's active holds to show indicator on cards
+  useEffect(() => {
+    if (!user) {
+      setUserHoldsByBook({});
+      return;
+    }
+    async function loadUserHolds() {
+      try {
+        const { data } = await supabase
+          .from('holds')
+          .select('book_id')
+          .eq('patron_user_id', user.id)
+          .in('status', ['waiting', 'accepted']);
+        if (data) {
+          const map: Record<string, boolean> = {};
+          for (const h of data) {
+            map[h.book_id] = true;
+          }
+          setUserHoldsByBook(map);
+        }
+      } catch (err) {
+        console.error('Failed to load user holds:', err);
+      }
+    }
+    loadUserHolds();
+  }, [user]);
 
   async function loadCatalog(libId: string, query: string) {
     setLoading(true);
@@ -332,6 +362,13 @@ function CatalogContent() {
                     {showPartial && (
                       <span className="inline-block mt-2 rounded-md bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-700">
                         {avail.available} of {avail.total} available
+                      </span>
+                    )}
+
+                    {/* "You have a hold" indicator */}
+                    {user && userHoldsByBook[book.id] && (
+                      <span className="inline-block mt-2 rounded-md bg-indigo-100 px-2 py-0.5 text-xs font-medium text-indigo-700">
+                        You have a hold
                       </span>
                     )}
                   </div>
