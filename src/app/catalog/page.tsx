@@ -16,6 +16,7 @@ function CatalogContent() {
   const [searchQuery, setSearchQuery] = useState('');
   const [loading, setLoading] = useState(true);
   const [libraries, setLibraries] = useState([]);
+  const [showFilters, setShowFilters] = useState(false);
 
     // Load libraries once on mount
   useEffect(() => {
@@ -133,84 +134,107 @@ function CatalogContent() {
           <p className="mt-2 text-sm text-slate-500">Browse and manage your library catalog.</p>
         </header>
 
-        {/* Library Selector */}
-        <div>
-          <label htmlFor="catalog-library" className="block text-sm font-medium text-slate-700 mb-1">
-            Library
-          </label>
-          <select
-            id="catalog-library"
-            value={activeLibId}
-            onChange={(e) => {
-              const v = e.target.value;
-              const params = new URLSearchParams(window.location.search);
-              if (v) { params.set('library', v); } else { params.delete('library'); }
-              router.push(`/catalog?${params.toString()}`, { scroll: false });
-            }}
-            className="w-full sm:w-72 rounded-lg border border-slate-300 px-4 py-2 text-sm focus:border-indigo-500 focus:ring-indigo-500"
-          >
-            <option value="">All Libraries</option>
-            {libraries.map(lib => (
-              <option key={lib.id} value={lib.id}>{lib.name}</option>
-            ))}
-          </select>
-
-          {/* When viewing a specific library: show management link */}
-          {activeLibId && selectedLibrary ? (
-            <div className="mt-3">
-              <Link href={`/libraries/${activeLibId}/manage-books`}
-                    className="text-sm text-indigo-600 hover:text-indigo-800">
-                Manage books in {selectedLibrary.name} &rarr;
-              </Link>
-            </div>
-          ) : null}
-
-          {/* Quick cross-library links when viewing all */}
-          {showAll && libraries.length > 1 ? (
-            <>
-              <hr className="my-4 border-slate-200" />
-              <p className="text-xs text-slate-400 mb-1">Browse by library:</p>
-              <div className="flex flex-wrap gap-2">
-                {libraries.map(lib => (
-                  <Link key={lib.id} href={`/catalog?library=${lib.id}`}
-                        className="text-sm text-indigo-600 hover:text-indigo-800">
-                    {lib.name}
-                  </Link>
-                ))}
-              </div>
-            </>
-          ) : null}
-
-          <p className="mt-2 text-xs text-slate-400">
-            Select a library to filter the catalog. If no books appear for that library,
-            add them through the {showAll ? '"Manage Books"' : 'library'} interface.
-          </p>
-        </div>
-
-        {/* Search */}
-        <div>
-          <input
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            placeholder="Search by title or ISBN..."
-            className="w-full sm:w-96 rounded-lg border border-slate-300 px-4 py-2 text-sm focus:border-indigo-500 focus:ring-indigo-500"
-          />
-        </div>
-
-        {/* Results count */}
-        <p className="text-sm text-slate-600">
-          {books.length || 0} book{books.length !== 1 ? 's' : ''} found
-        </p>
-
-        {/* Add Book Button */}
-        <div className="flex justify-end">
+        {/* Filter Controls Toggle */}
+        <div className="flex items-center justify-between">
           <button
-            onClick={() => setShowDialog(true)}
-            className="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-indigo-700"
+            onClick={() => setShowFilters(!showFilters)}
+            className="flex items-center gap-2 text-sm font-medium text-indigo-600 hover:text-indigo-800 transition"
           >
-            + Add Book
+            <svg
+              className={`w-4 h-4 transition-transform duration-200 ${showFilters ? 'rotate-90' : ''}`}
+              fill="none"
+              viewBox="0 0 24 24"
+              stroke="currentColor"
+            >
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+            </svg>
+            Filters
           </button>
+          <div className="flex items-center gap-3">
+            <p className="text-sm text-slate-600">
+              {books.length || 0} book{books.length !== 1 ? 's' : ''} found
+            </p>
+            <button
+              onClick={() => setShowDialog(true)}
+              className="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-indigo-700 transition"
+            >
+              + Add Book
+            </button>
+          </div>
         </div>
+
+        {/* Filter Panel (collapsible) */}
+        {showFilters && (
+          <div className="rounded-xl border border-slate-200 bg-slate-50 p-5 space-y-4">
+            {/* Library Selector */}
+            <div>
+              <label htmlFor="catalog-library" className="block text-sm font-medium text-slate-700 mb-1">
+                Library
+              </label>
+              <select
+                id="catalog-library"
+                value={activeLibId}
+                onChange={(e) => {
+                  const v = e.target.value;
+                  const params = new URLSearchParams(window.location.search);
+                  if (v) { params.set('library', v); } else { params.delete('library'); }
+                  router.push(`/catalog?${params.toString()}`, { scroll: false });
+                }}
+                className="w-full sm:w-72 rounded-lg border border-slate-300 px-4 py-2 text-sm focus:border-indigo-500 focus:ring-indigo-500"
+              >
+                <option value="">All Libraries</option>
+                {libraries.map(lib => (
+                  <option key={lib.id} value={lib.id}>{lib.name}</option>
+                ))}
+              </select>
+
+              {/* When viewing a specific library: show management link */}
+              {activeLibId && selectedLibrary ? (
+                <div className="mt-3">
+                  <Link href={`/libraries/${activeLibId}/manage-books`}
+                        className="text-sm text-indigo-600 hover:text-indigo-800">
+                    Manage books in {selectedLibrary.name} &rarr;
+                  </Link>
+                </div>
+              ) : null}
+
+              {/* Quick cross-library links when viewing all */}
+              {showAll && libraries.length > 1 ? (
+                <>
+                  <hr className="my-4 border-slate-300" />
+                  <p className="text-xs font-medium text-slate-500 uppercase tracking-wide mb-2">Browse by library:</p>
+                  <div className="flex flex-wrap gap-2">
+                    {libraries.map(lib => (
+                      <Link key={lib.id} href={`/catalog?library=${lib.id}`}
+                            className="text-sm text-indigo-600 hover:text-indigo-800">
+                        {lib.name}
+                      </Link>
+                    ))}
+                  </div>
+                </>
+              ) : null}
+
+              <p className="mt-3 text-xs text-slate-400">
+                Select a library to filter the catalog. If no books appear for that library,
+                add them through the {showAll ? '"Manage Books"' : 'library'} interface.
+              </p>
+            </div>
+
+            {/* Search */}
+            <div>
+              <label htmlFor="catalog-search" className="block text-sm font-medium text-slate-700 mb-1">
+                Search
+              </label>
+              <input
+                id="catalog-search"
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                placeholder="Search by title, author, or ISBN..."
+                className="w-full sm:w-96 rounded-lg border border-slate-300 px-4 py-2 text-sm focus:border-indigo-500 focus:ring-indigo-500"
+              />
+            </div>
+          </div>
+        )}
 
         {/* Books List */}
         {loading ? (
