@@ -163,7 +163,17 @@ function CatalogContent() {
           </div>
         </div>
 
-        {/* Filter Panel (collapsible) */}
+        {/* Search — always visible */}
+        <div>
+          <input
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            placeholder="Search by title, author, or ISBN..."
+            className="w-full sm:w-96 rounded-lg border border-slate-300 px-4 py-2 text-sm focus:border-indigo-500 focus:ring-indigo-500"
+          />
+        </div>
+
+        {/* Filter Panel (collapsible) — library selector + cross-library links */}
         {showFilters && (
           <div className="rounded-xl border border-slate-200 bg-slate-50 p-5 space-y-4">
             {/* Library Selector */}
@@ -218,20 +228,6 @@ function CatalogContent() {
                 Select a library to filter the catalog. If no books appear for that library,
                 add them through the {showAll ? '"Manage Books"' : 'library'} interface.
               </p>
-            </div>
-
-            {/* Search */}
-            <div>
-              <label htmlFor="catalog-search" className="block text-sm font-medium text-slate-700 mb-1">
-                Search
-              </label>
-              <input
-                id="catalog-search"
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                placeholder="Search by title, author, or ISBN..."
-                className="w-full sm:w-96 rounded-lg border border-slate-300 px-4 py-2 text-sm focus:border-indigo-500 focus:ring-indigo-500"
-              />
             </div>
           </div>
         )}
