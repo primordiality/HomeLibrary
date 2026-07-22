@@ -28,7 +28,7 @@ export default function LibrariesPage() {
     const [phone, setPhone] = useState('')
     const [submitting, setSubmitting] = useState(false)
     const [errorMessage, setErrorMessage] = useState<string | null>(null)
-    const [authorizedLibraryIds, setAuthorizedLibraryIds] = useState<Set<string> | null>(null)
+    const [authorizedLibraryIds, setAuthorizedLibraryIds] = useState<Set<string> | null | undefined>(undefined)
     const [loadingAuth, setLoadingAuth] = useState(true)
 
     // Load user's authorized libraries
@@ -117,7 +117,7 @@ export default function LibrariesPage() {
              }
          }
         loadLibraries()
-     }, [user])
+     }, [user, authorizedLibraryIds])
 
      // Always show loading state for auth
     if (authLoading || loadingAuth) {
