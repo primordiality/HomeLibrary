@@ -118,7 +118,10 @@ CREATE TABLE book_copies (
     purchase_price numeric(10,2),
     acquired_date date,
     created_at timestamptz NOT NULL DEFAULT now(),
-    updated_at timestamptz NOT NULL DEFAULT now()
+    updated_at timestamptz NOT NULL DEFAULT now(),
+    public boolean NOT NULL DEFAULT true,       -- visible to patrons in this library
+    holds_enabled boolean NOT NULL DEFAULT true, -- patrons can place holds on this library's copies
+    checkouts_enabled boolean NOT NULL DEFAULT true -- patrons can check out this library's copies
 );
 
 CREATE INDEX book_copies_book_library_idx ON book_copies USING btree (book_id, library_id);

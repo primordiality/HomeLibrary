@@ -67,6 +67,9 @@ export interface BookCopy {
   acquired_date?: string | null // YYYY-MM-DD when acquired
   created_at: string            // ISO datetime
   updated_at: string            // ISO datetime
+  public?: boolean | null       // NEW: visible to patrons in this library
+  holds_enabled?: boolean | null // NEW: patrons can place holds on this library's copies
+  checkouts_enabled?: boolean | null // NEW: patrons can check out this library's copies
 }
 
 export interface BorrowRecord {
