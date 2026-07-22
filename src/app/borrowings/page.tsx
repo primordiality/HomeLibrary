@@ -22,6 +22,7 @@ function BorrowingsContent() {
   const [showCheckoutModal, setShowCheckoutModal] = useState(false);
   const [checkoutPatron, setCheckoutPatron] = useState('');
   const [checkoutBookId, setCheckoutBookId] = useState('');
+  const [checkoutBookTitle, setCheckoutBookTitle] = useState('');
   const [checkoutCopyId, setCheckoutCopyId] = useState('');
   const [searchBooks, setSearchBooks] = useState('');
   const [bookSearchResults, setBookSearchResults] = useState<any[]>([]);
@@ -29,6 +30,8 @@ function BorrowingsContent() {
   const [checkoutLoading, setCheckoutLoading] = useState(false);
   const [checkoutError, setCheckoutError] = useState<string | null>(null);
   const [checkoutSuccess, setCheckoutSuccess] = useState<string | null>(null);
+  const [currentUser, setCurrentUser] = useState<any>(null);
+  const [currentUserPatronId, setCurrentUserPatronId] = useState('');
 
   // Return confirmation
   const [returnConfirm, setReturnConfirm] = useState<string | null>(null);
@@ -42,6 +45,26 @@ function BorrowingsContent() {
 
   // Hold queues for position calculation
   const [bookHoldQueues, setBookHoldQueues] = useState<Record<string, any[]>>({});
+
+  // Load current user when modal opens
+  useEffect(() => {
+    async function loadCurrentUser() {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (user) {
+        setCurrentUser(user);
+        const { data: profile } = await supabase
+          .from('profiles')
+          .select('*')
+          .eq('id', user.id)
+          .single();
+        if (profile && (profile.role === 'patron' || !profile.role)) {
+          setCurrentUserPatronId(user.id);
+          setCheckoutPatron(user.id);
+        }
+      }
+    }
+    if (showCheckoutModal) loadCurrentUser();
+  }, [showCheckoutModal]);
 
   useEffect(() => {
     loadPatrons();
@@ -162,8 +185,9 @@ function BorrowingsContent() {
   }
 
   async function handleSelectBook(bookId: string) {
+    const book = bookSearchResults.find((b: any) => b.id === bookId);
     setCheckoutBookId(bookId);
-    setCheckoutCopyId('');
+    setCheckoutBookTitle(book?.title || booksMap[bookId]?.title || 'Unknown');
     setSearchBooks('');
     setBookSearchResults([]);
 
@@ -180,10 +204,17 @@ function BorrowingsContent() {
         );
         const available = copies.filter((c: any) => !activeCopyIds.has(c.id));
         setAvailableCopiesForBook(available);
+        // Auto-select if only 1 copy available
+        if (available.length === 1) {
+          setCheckoutCopyId(available[0].id);
+        } else {
+          setCheckoutCopyId('');
+        }
       }
     } catch (e: any) {
       console.error('Failed to load available copies:', e.message);
       setAvailableCopiesForBook([]);
+      setCheckoutCopyId('');
     }
   }
 
@@ -799,18 +830,24 @@ function BorrowingsContent() {
                  <div className="space-y-4">
                    <div>
                      <label className="block text-sm font-medium text-slate-700 mb-1">Patron</label>
-                     <select
-                       value={checkoutPatron}
-                       onChange={(e) => setCheckoutPatron(e.target.value)}
-                       className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-indigo-500 focus:ring-indigo-500"
-                     >
-                       <option value="">Select a patron...</option>
-                       {patronsAll.map((ptn) => (
-                         <option key={String(ptn.id)} value={String(ptn.id)}>
-                           {ptn.name || ptn.email}
-                         </option>
-                       ))}
-                     </select>
+                     {currentUserPatronId ? (
+                       <div className="w-full rounded-lg border border-indigo-200 bg-indigo-50 px-3 py-2 text-sm text-slate-700">
+                         {patronMap[currentUserPatronId] || currentUser?.email || 'Unknown'}
+                       </div>
+                     ) : (
+                       <select
+                         value={checkoutPatron}
+                         onChange={(e) => setCheckoutPatron(e.target.value)}
+                         className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-indigo-500 focus:ring-indigo-500"
+                       >
+                         <option value="">Select a patron...</option>
+                         {patronsAll.map((ptn) => (
+                           <option key={String(ptn.id)} value={String(ptn.id)}>
+                             {ptn.name || ptn.email}
+                           </option>
+                         ))}
+                       </select>
+                     )}
                    </div>
 
                    {/* Book search */}
@@ -848,14 +885,21 @@ function BorrowingsContent() {
                        </ul>
                      )}
                      {checkoutBookId && (
-                       <div className="mt-1 text-xs text-slate-500">
-                         Selected: {booksMap[Object.keys(copyBookIdCache).find(k => copyBookIdCache[k] === checkoutBookId)?.toString()]?.title || '—'}
+                       <div className="mt-1 flex items-center gap-2 rounded-lg border border-indigo-200 bg-indigo-50 px-3 py-2 text-sm text-slate-700">
+                         <span className="text-indigo-600">✓</span>
+                         <span className="font-medium">{checkoutBookTitle || '—'}</span>
+                         <button
+                           onClick={() => { setCheckoutBookId(''); setCheckoutBookTitle(''); setAvailableCopiesForBook([]); setCheckoutCopyId(''); }}
+                           className="ml-auto text-slate-400 hover:text-slate-600"
+                         >
+                           ✕
+                         </button>
                        </div>
                      )}
-                   </div>
+                     </div>
 
-                   {/* Available copies for selected book */}
-                   {availableCopiesForBook.length > 0 && (
+                     {/* Available copies for selected book */}
+                     {availableCopiesForBook.length > 1 && (
                      <div>
                        <label className="block text-sm font-medium text-slate-700 mb-1">Available Copies</label>
                        <select
@@ -874,7 +918,29 @@ function BorrowingsContent() {
                          ))}
                        </select>
                      </div>
-                   )}
+                     )}
+
+                     {/* Single copy available — show info and let user confirm */}
+                     {availableCopiesForBook.length === 1 && (
+                     <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-slate-700">
+                       <div className="flex items-center gap-2">
+                         <span className="text-emerald-600">✓</span>
+                         <span className="font-medium">1 copy available</span>
+                       </div>
+                       <div className="mt-1 text-xs text-slate-500">
+                         {availableCopiesForBook[0].barcode ? `Barcode: ${availableCopiesForBook[0].barcode}` : 'Copy 1'}
+                         {availableCopiesForBook[0].location_name ? ` — ${availableCopiesForBook[0].location_name}` : ''}
+                         {availableCopiesForBook[0].condition ? ` — ${availableCopiesForBook[0].condition}` : ''}
+                       </div>
+                     </div>
+                     )}
+
+                     {/* No copies available */}
+                     {checkoutBookId && availableCopiesForBook.length === 0 && (
+                     <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+                       No copies available for checkout.
+                     </div>
+                     )}
 
                    {/* Checkout error/success */}
                    {checkoutError && (
