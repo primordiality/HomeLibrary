@@ -134,6 +134,7 @@ async function searchWorksByTitle(
   publisher?: string[];
   first_publish_year?: number | null;
   cover_edition_id?: number | null;
+  cover_i?: number | null;
 }[]> {
   const cleaned = query.replace(/[-\s]/g, '').trim();
   if (cleaned.length < 2) return [];
@@ -150,7 +151,7 @@ async function searchWorksByTitle(
     params.set(
       'fields',
       'key,title,subtitle,author_name,isbn,publisher_name,' +
-        'first_publish_year,cover_edition_id,number_of_pages',
+        'first_publish_year,cover_edition_id,cover_i,number_of_pages',
     );
 
     const res = await fetch(`${BASE}/search.json?${params.toString()}`);
@@ -167,6 +168,7 @@ async function searchWorksByTitle(
         publisher?: string[];
         first_publish_year?: number | null;
         cover_edition_id?: number | null;
+        cover_i?: number | null;
       } => ({
         key: doc.key,
         title: doc.title ?? '',
@@ -179,6 +181,7 @@ async function searchWorksByTitle(
         publisher: doc.publisher_name ?? [],
         first_publish_year: doc.first_publish_year,
         cover_edition_id: doc.cover_edition_id,
+        cover_i: doc.cover_i,
       }),
     );
   } catch {

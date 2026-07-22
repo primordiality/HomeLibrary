@@ -21,6 +21,7 @@ type OLWork = {
   publisher?: string[];
   first_publish_year?: number | null;
   cover_edition_id?: number | null;
+  cover_i?: number | null;
 };
 
 type FormValues = {
@@ -206,6 +207,12 @@ const AddBookDialogComponent = forwardRef<
 
   function populateFormFromWork(work: OLWork): void {
     const isbnStr = work?.ISBN?.[0] ?? '';
+    // Build cover URL: prefer cover_edition_id (b/id), fall back to cover_i (c/id)
+    const coverUrl = work.cover_edition_id
+      ? `https://covers.openlibrary.org/b/id/${work.cover_edition_id}-M.jpg`
+      : work.cover_i
+        ? `https://covers.openlibrary.org/c/id/${work.cover_i}-M.jpg`
+        : '';
     setForm({
       isbn: isbnStr,
       title: (work?.title ?? '').trim(),
@@ -216,9 +223,7 @@ const AddBookDialogComponent = forwardRef<
         ? String(work.first_publish_year)
         : '',
       pages: '',
-      coverUrl: work.cover_edition_id
-        ? `https://covers.openlibrary.org/b/id/${work.cover_edition_id}-M.jpg`
-        : '',
+      coverUrl,
     });
     setStep('review');
   }
