@@ -309,9 +309,31 @@ function PatronDashboard() {
 }
 
 function StaffDashboard() {
+  const { user, profile } = useAuth();
   const [stats, setStats] = useState({ libraries: 0, books: 0 });
   const [loading, setLoading] = useState(true);
   const [recentActivity, setRecentActivity] = useState<any[]>([]);
+  const [adminLibraries, setAdminLibraries] = useState<string[]>([]);
+
+  // Determine which libraries this user can see
+  useEffect(() => {
+    async function fetchLibraryScope() {
+      if (profile?.role === 'system_admin') return;
+
+      // For library_owner and librarian, fetch their library IDs
+      const { data: members } = await supabase
+        .from('library_members')
+        .select('library_id')
+        .eq('user_id', user?.id)
+        .in('role', ['library_owner', 'librarian']);
+
+      if (members) {
+        setAdminLibraries(members.map((m) => m.library_id));
+      }
+    }
+
+    fetchLibraryScope();
+  }, [user, profile]);
 
   useEffect(() => {
     async function loadCounts() {
@@ -340,93 +362,202 @@ function StaffDashboard() {
 
     async function loadRecentActivity() {
       try {
-        // Load last 20 borrows and holds combined
+        // Load last 50 borrows and holds combined (give ourselves room to filter)
         const [{ data: borrows }, { data: holds }] = await Promise.all([
           supabase
             .from('borrows')
-            .select('*, patron_user_id, copy_id, checkout_date, due_date, return_date')
+            .select('id, patron_user_id, copy_id, checkout_date, due_date, return_date')
             .order('checkout_date', { ascending: false })
-            .limit(20),
+            .limit(50),
           supabase
             .from('holds')
-            .select('*, patron_user_id, book_id, status, created_at')
+            .select('id, patron_user_id, book_id, library_id, status, created_at')
             .order('created_at', { ascending: false })
-            .limit(20),
+            .limit(50),
         ]);
 
-        // Build activity entries
-        const entries: any[] = [];
+        // If not system_admin, filter by library scope
+        let filteredBorrows = borrows ?? [];
+        let filteredHolds = holds ?? [];
 
-        // Borrows
-        const copyIds = (borrows ?? []).map((b: any) => b.copy_id);
-        const copyBookMap: Record<string, string> = {};
+        if (profile?.role !== 'system_admin' && adminLibraries.length > 0) {
+          // Filter holds by library_id
+          filteredHolds = filteredHolds.filter((h: any) =>
+            adminLibraries.includes(h.library_id)
+          );
+
+          // Filter borrows: need to get library_id from book_copies via copy_id
+          const filteredCopyIds = filteredBorrows.map((b: any) => b.copy_id);
+          if (filteredCopyIds.length > 0) {
+            const { data: copies } = await supabase
+              .from('book_copies')
+              .select('id, library_id')
+              .in('id', filteredCopyIds);
+
+            const allowedCopyIds = new Set<string>();
+            if (copies) {
+              for (const c of copies) {
+                if (adminLibraries.includes(c.library_id)) {
+                  allowedCopyIds.add(c.id);
+                }
+              }
+            }
+            filteredBorrows = filteredBorrows.filter((b: any) =>
+              allowedCopyIds.has(b.copy_id)
+            );
+          }
+        }
+
+        // Gather all patron_user_ids from both borrows and holds
+        const patronIds = [
+          ...new Set([
+            ...filteredBorrows.map((b: any) => b.patron_user_id),
+            ...filteredHolds.map((h: any) => h.patron_user_id),
+          ]),
+        ];
+
+        // Batch fetch all patron names
+        const patronsMap: Record<string, string> = {};
+        if (patronIds.length > 0) {
+          const { data: profiles } = await supabase
+            .from('profiles')
+            .select('id, name, email')
+            .in('id', patronIds);
+
+          if (profiles) {
+            for (const p of profiles) {
+              patronsMap[p.id] = p.name || p.email || 'Unknown';
+            }
+          }
+        }
+
+        // Get library names for borrows (via book_copies) and holds
+        const libraryIds = new Set<string>();
+
+        // Holds have library_id directly
+        filteredHolds.forEach((h: any) => {
+          if (h.library_id) libraryIds.add(h.library_id);
+        });
+
+        // Borrows need library_id from book_copies
+        const copyIds = filteredBorrows.map((b: any) => b.copy_id);
+        if (copyIds.length > 0) {
+          const { data: copies } = await supabase
+            .from('book_copies')
+            .select('id, library_id')
+            .in('id', copyIds);
+
+          if (copies) {
+            copies.forEach((c: any) => libraryIds.add(c.library_id));
+          }
+        }
+
+        const libraryMap: Record<string, string> = {};
+        if (libraryIds.size > 0) {
+          const { data: libraries } = await supabase
+            .from('libraries')
+            .select('id, name')
+            .in('id', [...libraryIds]);
+
+          if (libraries) {
+            for (const lib of libraries) {
+              libraryMap[lib.id] = lib.name || 'Unknown Library';
+            }
+          }
+        }
+
+        // Build copy_id -> library_id map
+        const copyToLibrary: Record<string, string> = {};
+        if (copyIds.length > 0) {
+          const { data: copies } = await supabase
+            .from('book_copies')
+            .select('id, library_id')
+            .in('id', copyIds);
+
+          if (copies) {
+            for (const c of copies) {
+              copyToLibrary[c.id] = c.library_id;
+            }
+          }
+        }
+
+        // Build copy_id -> book_id map for borrows
+        const copyToBook: Record<string, string> = {};
         if (copyIds.length > 0) {
           const { data: copies } = await supabase
             .from('book_copies')
             .select('id, book_id')
             .in('id', copyIds);
+
           if (copies) {
             for (const c of copies) {
-              copyBookMap[c.id] = c.book_id;
+              copyToBook[c.id] = c.book_id;
             }
           }
         }
-        const bookIdsFromBorrows = [...new Set(Object.values(copyBookMap))];
+
+        // Build book titles for borrows
+        const bookIdsFromBorrows = [...new Set(Object.values(copyToBook))];
         const bookMapFromBorrows: Record<string, string> = {};
         if (bookIdsFromBorrows.length > 0) {
           const { data: books } = await supabase
             .from('books')
             .select('id, title')
             .in('id', bookIdsFromBorrows);
+
           if (books) {
             for (const b of books) {
               bookMapFromBorrows[b.id] = b.title || 'Untitled';
             }
           }
         }
-        for (const b of (borrows ?? [])) {
-          const bookId = copyBookMap[b.copy_id];
-          const bookTitle = bookMapFromBorrows[bookId] || 'Untitled';
-          const isReturn = !!b.return_date;
-          entries.push({
-            type: isReturn ? 'return' : 'checkout',
-            patron_id: b.patron_user_id,
-            book_title: bookTitle,
-            date: b.checkout_date,
-          });
-        }
 
-        // Holds
-        const heldBookIds = (holds ?? []).map((h: any) => h.book_id);
+        // Build book titles for holds
+        const heldBookIds = filteredHolds.map((h: any) => h.book_id);
         const bookMapFromHolds: Record<string, string> = {};
         if (heldBookIds.length > 0) {
           const { data: books } = await supabase
             .from('books')
             .select('id, title')
             .in('id', heldBookIds);
+
           if (books) {
             for (const b of books) {
               bookMapFromHolds[b.id] = b.title || 'Untitled';
             }
           }
         }
-        const profilesMap: Record<string, string> = {};
-        for (const h of (holds ?? [])) {
-          let patronName = profilesMap[h.patron_user_id];
-          if (!patronName) {
-            const { data: profile } = await supabase
-              .from('profiles')
-              .select('name, email')
-              .eq('id', h.patron_user_id)
-              .single();
-            patronName = profile?.name || profile?.email || 'Unknown';
-            profilesMap[h.patron_user_id] = patronName;
-          }
+
+        // Build activity entries
+        const entries: any[] = [];
+
+        // Borrows
+        for (const b of filteredBorrows) {
+          const bookId = copyToBook[b.copy_id];
+          const bookTitle = bookMapFromBorrows[bookId] || 'Untitled';
+          const libraryId = copyToLibrary[b.copy_id];
+          const libraryName = libraryMap[libraryId] || 'Unknown Library';
+          const isReturn = !!b.return_date;
+
+          entries.push({
+            type: isReturn ? 'return' : 'checkout',
+            patron_name: patronsMap[b.patron_user_id] || 'Unknown',
+            book_title: bookTitle,
+            library_name: libraryName,
+            date: b.checkout_date,
+          });
+        }
+
+        // Holds
+        for (const h of filteredHolds) {
           const bookTitle = bookMapFromHolds[h.book_id] || 'Untitled';
+          const libraryName = libraryMap[h.library_id] || 'Unknown Library';
+
           entries.push({
             type: h.status,
-            patron_name: patronName,
+            patron_name: patronsMap[h.patron_user_id] || 'Unknown',
             book_title: bookTitle,
+            library_name: libraryName,
             date: h.created_at,
           });
         }
@@ -529,6 +660,7 @@ function StaffDashboard() {
               <tr className="text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
                 <th className="pb-3 pl-2">User</th>
                 <th className="pb-3">Action</th>
+                <th className="pb-3 hidden lg:table-cell">Library</th>
                 <th className="pb-3 hidden sm:table-cell">Book</th>
                 <th className="pb-3 text-right">Date</th>
               </tr>
@@ -536,13 +668,13 @@ function StaffDashboard() {
             <tbody className="divide-y">
               {recentActivity.map((activity, index) => {
                 const label = activityLabel(activity.type);
-                const userName = activity.patron_name || activity.patron_id;
                 return (
                   <tr key={index} className="hover:bg-slate-50">
-                    <td className="py-3 pl-2 text-slate-900">{userName}</td>
+                    <td className="py-3 pl-2 text-slate-900">{activity.patron_name || 'Unknown'}</td>
                     <td className="py-3">
                       <span className={`font-medium ${label.color}`}>{label.text}</span>
                     </td>
+                    <td className="py-3 hidden lg:table-cell text-slate-600">{activity.library_name}</td>
                     <td className="py-3 hidden sm:table-cell text-slate-600">{activity.book_title}</td>
                     <td className="py-3 text-right text-slate-500">{formatDisplayDate(activity.date)}</td>
                   </tr>
@@ -556,13 +688,14 @@ function StaffDashboard() {
               <tr className="text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
                 <th className="pb-3 pl-2">User</th>
                 <th className="pb-3">Action</th>
+                <th className="pb-3 hidden lg:table-cell">Library</th>
                 <th className="pb-3 hidden sm:table-cell">Book</th>
                 <th className="pb-3 text-right">Date</th>
               </tr>
             </thead>
             <tbody>
               <tr>
-                <td colSpan={4} className="py-8 text-center text-sm text-slate-400">
+                <td colSpan={5} className="py-8 text-center text-sm text-slate-400">
                   No recent activity to display.
                 </td>
               </tr>
