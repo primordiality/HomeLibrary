@@ -331,8 +331,15 @@ export default function BookDetailPage({ params }: { params: { bookId: string } 
           ← Back to Catalog
         </Link>
         
-        <div className="flex items-start justify-between">
-          <div>
+        <div className="flex items-start gap-6">
+          {book.cover_url && (
+            <img
+              src={book.cover_url}
+              alt={`${book.title} cover`}
+              className="w-40 h-56 object-cover rounded-xl shadow-lg shrink-0 border border-slate-200"
+            />
+          )}
+          <div className={book.cover_url ? 'min-w-0' : 'flex-1'}>
             <h1 className="text-3xl font-bold text-slate-900">{book.title || 'Unknown Book'}</h1>
             <p className="mt-1 text-lg text-slate-500">
               {book.authors?.join(', ') || 'Unknown author'}
@@ -341,13 +348,6 @@ export default function BookDetailPage({ params }: { params: { bookId: string } 
               <p className="mt-1 text-sm text-slate-400 italic">{book.subtitle}</p>
             )}
           </div>
-          {book.cover_url && (
-            <img
-              src={book.cover_url}
-              alt={`${book.title} cover`}
-              className="w-20 h-28 object-cover rounded-lg shadow-sm shrink-0"
-            />
-          )}
         </div>
       </header>
 
