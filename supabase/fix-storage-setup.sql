@@ -1,8 +1,9 @@
 -- ═══════ Supabase Storage Setup ═══════
 -- Run this in Supabase SQL Editor (Dashboard → SQL Editor → New Query)
+-- Prerequisite: Storage API must be enabled (Dashboard → Storage → Settings)
 
--- 1. Enable the storage schema (create if not exists)
-CREATE SCHEMA IF NOT EXISTS storage;
+-- 1. Enable the storage extension (required for storage.policies table)
+CREATE EXTENSION IF NOT EXISTS pgcrypto;
 
 -- 2. Create the bucket
 INSERT INTO storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
@@ -18,7 +19,6 @@ ON CONFLICT (id) DO UPDATE SET
   file_size_limit = EXCLUDED.file_size_limit;
 
 -- 3. Create RLS policies (handles the "new row violates RLS" error)
-
 -- View images (anyone can see them since bucket is public)
 DO $$ BEGIN
   IF NOT EXISTS (
