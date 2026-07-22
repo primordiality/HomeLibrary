@@ -311,6 +311,7 @@ function PatronDashboard() {
 function StaffDashboard() {
   const [stats, setStats] = useState({ libraries: 0, books: 0 });
   const [loading, setLoading] = useState(true);
+  const [recentActivity, setRecentActivity] = useState<any[]>([]);
 
   useEffect(() => {
     async function loadCounts() {
@@ -336,8 +337,131 @@ function StaffDashboard() {
         setLoading(false);
       }
     }
+
+    async function loadRecentActivity() {
+      try {
+        // Load last 20 borrows and holds combined
+        const [{ data: borrows }, { data: holds }] = await Promise.all([
+          supabase
+            .from('borrows')
+            .select('*, patron_user_id, copy_id, checkout_date, due_date, return_date')
+            .order('checkout_date', { ascending: false })
+            .limit(20),
+          supabase
+            .from('holds')
+            .select('*, patron_user_id, book_id, status, created_at')
+            .order('created_at', { ascending: false })
+            .limit(20),
+        ]);
+
+        // Build activity entries
+        const entries: any[] = [];
+
+        // Borrows
+        const copyIds = (borrows ?? []).map((b: any) => b.copy_id);
+        const copyBookMap: Record<string, string> = {};
+        if (copyIds.length > 0) {
+          const { data: copies } = await supabase
+            .from('book_copies')
+            .select('id, book_id')
+            .in('id', copyIds);
+          if (copies) {
+            for (const c of copies) {
+              copyBookMap[c.id] = c.book_id;
+            }
+          }
+        }
+        const bookIdsFromBorrows = [...new Set(Object.values(copyBookMap))];
+        const bookMapFromBorrows: Record<string, string> = {};
+        if (bookIdsFromBorrows.length > 0) {
+          const { data: books } = await supabase
+            .from('books')
+            .select('id, title')
+            .in('id', bookIdsFromBorrows);
+          if (books) {
+            for (const b of books) {
+              bookMapFromBorrows[b.id] = b.title || 'Untitled';
+            }
+          }
+        }
+        for (const b of (borrows ?? [])) {
+          const bookId = copyBookMap[b.copy_id];
+          const bookTitle = bookMapFromBorrows[bookId] || 'Untitled';
+          const isReturn = !!b.return_date;
+          entries.push({
+            type: isReturn ? 'return' : 'checkout',
+            patron_id: b.patron_user_id,
+            book_title: bookTitle,
+            date: b.checkout_date,
+          });
+        }
+
+        // Holds
+        const heldBookIds = (holds ?? []).map((h: any) => h.book_id);
+        const bookMapFromHolds: Record<string, string> = {};
+        if (heldBookIds.length > 0) {
+          const { data: books } = await supabase
+            .from('books')
+            .select('id, title')
+            .in('id', heldBookIds);
+          if (books) {
+            for (const b of books) {
+              bookMapFromHolds[b.id] = b.title || 'Untitled';
+            }
+          }
+        }
+        const profilesMap: Record<string, string> = {};
+        for (const h of (holds ?? [])) {
+          let patronName = profilesMap[h.patron_user_id];
+          if (!patronName) {
+            const { data: profile } = await supabase
+              .from('profiles')
+              .select('name, email')
+              .eq('id', h.patron_user_id)
+              .single();
+            patronName = profile?.name || profile?.email || 'Unknown';
+            profilesMap[h.patron_user_id] = patronName;
+          }
+          const bookTitle = bookMapFromHolds[h.book_id] || 'Untitled';
+          entries.push({
+            type: h.status,
+            patron_name: patronName,
+            book_title: bookTitle,
+            date: h.created_at,
+          });
+        }
+
+        // Sort by date descending, take latest 20
+        entries.sort((a, b) => b.date.localeCompare(a.date));
+        setRecentActivity(entries.slice(0, 20));
+      } catch (err) {
+        console.error('Failed to load recent activity:', err);
+      }
+    }
+
     loadCounts();
+    loadRecentActivity();
   }, []);
+
+  function formatDisplayDate(isoStr: string): string {
+    return new Date(isoStr).toLocaleDateString(undefined, {
+      year: 'numeric',
+      month: 'short',
+      day: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+    });
+  }
+
+  function activityLabel(type: string): { text: string; color: string } {
+    switch (type) {
+      case 'checkout': return { text: 'Checked out', color: 'text-blue-700' };
+      case 'return': return { text: 'Returned', color: 'text-green-700' };
+      case 'waiting': return { text: 'Hold placed (waiting)', color: 'text-amber-700' };
+      case 'accepted': return { text: 'Hold accepted (ready)', color: 'text-green-700' };
+      default: return { text: type, color: 'text-slate-700' };
+    }
+  }
 
   return (
     <div className="space-y-8">
@@ -399,23 +523,52 @@ function StaffDashboard() {
       {/* Recent activity */}
       <section className="rounded-xl border bg-white p-6 shadow-sm">
         <h2 className="text-lg font-semibold mb-4">Recent Activity</h2>
-        <table className="w-full text-sm">
-          <thead className="border-b bg-slate-50">
-            <tr className="text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
-              <th className="pb-3 pl-2">User</th>
-              <th className="pb-3">Action</th>
-              <th className="pb-3 hidden sm:table-cell">Book</th>
-              <th className="pb-3 text-right">Date</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y">
-            <tr>
-              <td colSpan={4} className="py-8 text-center text-sm text-slate-400">
-                No recent activity to display.
-              </td>
-            </tr>
-          </tbody>
-        </table>
+        {recentActivity.length > 0 ? (
+          <table className="w-full text-sm">
+            <thead className="border-b bg-slate-50">
+              <tr className="text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
+                <th className="pb-3 pl-2">User</th>
+                <th className="pb-3">Action</th>
+                <th className="pb-3 hidden sm:table-cell">Book</th>
+                <th className="pb-3 text-right">Date</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y">
+              {recentActivity.map((activity, index) => {
+                const label = activityLabel(activity.type);
+                const userName = activity.patron_name || activity.patron_id;
+                return (
+                  <tr key={index} className="hover:bg-slate-50">
+                    <td className="py-3 pl-2 text-slate-900">{userName}</td>
+                    <td className="py-3">
+                      <span className={`font-medium ${label.color}`}>{label.text}</span>
+                    </td>
+                    <td className="py-3 hidden sm:table-cell text-slate-600">{activity.book_title}</td>
+                    <td className="py-3 text-right text-slate-500">{formatDisplayDate(activity.date)}</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        ) : (
+          <table className="w-full text-sm">
+            <thead className="border-b bg-slate-50">
+              <tr className="text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
+                <th className="pb-3 pl-2">User</th>
+                <th className="pb-3">Action</th>
+                <th className="pb-3 hidden sm:table-cell">Book</th>
+                <th className="pb-3 text-right">Date</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td colSpan={4} className="py-8 text-center text-sm text-slate-400">
+                  No recent activity to display.
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        )}
       </section>
 
       {/* Due soon / nudge section */}
