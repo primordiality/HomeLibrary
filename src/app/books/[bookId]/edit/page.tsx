@@ -31,6 +31,9 @@ export default function EditBookPage() {
   const [fetchingCover, setFetchingCover] = useState(false);
   const [showDelModal, setShowDelModal] = useState(false);
 
+  const [copySettings, setCopySettings] = useState<Record<string, { public: boolean; holds_enabled: boolean; checkouts_enabled: boolean }>>({});
+  const [savingCopies, setSavingCopies] = useState<Record<string, boolean>>({});
+
   useEffect(() => {
     if (!bookId) return router.push('/books');
     loadAll();
@@ -90,6 +93,20 @@ export default function EditBookPage() {
     setCoverUrl(book.cover_url || '');
     if (copRes) setCopies(copRes);
     if (pats.length > 0) setPatrons(pats);
+
+    // Populate copy settings from each copy's current values (default true if null)
+    if (copRes) {
+      const settings: Record<string, { public: boolean; holds_enabled: boolean; checkouts_enabled: boolean }> = {};
+      for (const c of copRes) {
+        settings[c.id] = {
+          public: c.public ?? true,
+          holds_enabled: c.holds_enabled ?? true,
+          checkouts_enabled: c.checkouts_enabled ?? true,
+        };
+      }
+      setCopySettings(settings);
+    }
+
     setLoading(false);
   }
 
@@ -166,6 +183,42 @@ export default function EditBookPage() {
     } catch (e: any) { setErrorStr(e.message || 'Checkout failed'); }
   }
 
+  async function handleCopySettingUpdate(copyId: string, field: string, value: boolean) {
+    setSavingCopies(prev => ({ ...prev, [copyId]: true }));
+    try {
+      const { error } = await supabase
+        .from('book_copies')
+        .update({ [field]: value })
+        .eq('id', copyId);
+      if (error) throw new Error(error.message || 'Failed to update setting');
+      setCopySettings(prev => ({
+        ...prev,
+        [copyId]: { ...prev[copyId], [field]: value }
+      }));
+      setOkMsg('Setting updated');
+    } catch (e: any) { setErrorStr(e.message || 'Update failed'); }
+    finally { setSavingCopies(prev => ({ ...prev, [copyId]: false })); }
+  }
+
+  async function handleBulkCopySettings(libraryName: string, field: string, value: boolean) {
+    // Only update copies in this library
+    const copiesInLib = copies.filter(c => c.location_name === libraryName);
+    const promises = copiesInLib.map(c =>
+      supabase.from('book_copies').update({ [field]: value }).eq('id', c.id)
+    );
+    await Promise.allSettled(promises);
+    // Update local state for all copies in this library
+    setCopySettings(prev => {
+      const next = { ...prev };
+      for (const c of copiesInLib) {
+        next[c.id] = { ...prev[c.id], [field]: value };
+      }
+      return next;
+    });
+    setOkMsg(`Applied "${field}" setting to all copies in ${libraryName}`);
+    router.refresh();
+  }
+
   if (loading) return <p className="text-sm text-slate-500 p-8">Loading...</p>;
   if (!copies.length && !bookId) return (<div className="mt-6 space-y-4 text-center py-12"><h1 className="text-xl font-bold text-slate-700">Not Found</h1><p className="text-sm text-slate-500">No book with this ID.</p></div>);
   if (!copies.length && bookId) return (<div className="mt-6 space-y-4 text-center py-12"><h1 className="text-xl font-bold text-slate-700">Not Found</h1><p className="text-sm text-slate-500">No book found with this ID.</p></div>);
@@ -229,6 +282,103 @@ export default function EditBookPage() {
               <button onClick={() => setShowDelModal(true)} className="rounded-lg border border-red-300 px-4 py-2.5 text-sm font-medium text-red-600 hover:bg-red-50">Delete Book</button>
             </div>
           </section>
+
+          {/* Visibility & Settings */}
+          {copies.length > 0 && (() => {
+            // Group copies by location_name
+            const groups: Record<string, any[]> = {};
+            for (const c of copies) {
+              const key = c.location_name || 'Not shelved';
+              if (!groups[key]) groups[key] = [];
+              groups[key].push(c);
+            }
+            const groupNames = Object.keys(groups);
+
+            return (
+              <section className="rounded-xl border border-slate-200 p-6 bg-white shadow-sm">
+                <h2 className="text-lg font-semibold text-slate-900 mb-4">Visibility &amp; Settings</h2>
+                <div className="space-y-5">
+                  {groupNames.map(locName => {
+                    const grp = groups[locName];
+                    return (
+                      <div key={locName} className="border border-slate-200 rounded-lg p-4 space-y-3">
+                        <div className="flex items-center justify-between">
+                          <h3 className="text-sm font-semibold text-slate-800">{locName} ({grp.length} {grp.length === 1 ? 'copy' : 'copies'})</h3>
+                        </div>
+                        {/* Public checkbox */}
+                        <div className="flex flex-wrap items-center justify-between gap-2">
+                          <div className="flex items-center gap-2">
+                            <input
+                              type="checkbox"
+                              id={`pub-${grp[0].id}`}
+                              checked={grp.every(c => copySettings[c.id]?.public !== false)}
+                              onChange={(e) => {
+                                const val = e.target.checked;
+                                grp.forEach(c => handleCopySettingUpdate(c.id, 'public', val));
+                              }}
+                              className="h-4 w-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500"
+                            />
+                            <label htmlFor={`pub-${grp[0].id}`} className="text-sm text-slate-700">Public — visible in patron catalog search</label>
+                          </div>
+                          <span className="text-xs text-slate-400">Per-copy controls</span>
+                        </div>
+                        {/* Allow holds checkbox */}
+                        <div className="flex flex-wrap items-center justify-between gap-2">
+                          <div className="flex items-center gap-2">
+                            <input
+                              type="checkbox"
+                              id={`holds-${grp[0].id}`}
+                              checked={grp.every(c => copySettings[c.id]?.holds_enabled !== false)}
+                              onChange={(e) => {
+                                const val = e.target.checked;
+                                grp.forEach(c => handleCopySettingUpdate(c.id, 'holds_enabled', val));
+                              }}
+                              className="h-4 w-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500"
+                            />
+                            <label htmlFor={`holds-${grp[0].id}`} className="text-sm text-slate-700">Allow holds</label>
+                          </div>
+                        </div>
+                        {/* Allow checkouts checkbox */}
+                        <div className="flex flex-wrap items-center justify-between gap-2">
+                          <div className="flex items-center gap-2">
+                            <input
+                              type="checkbox"
+                              id={`checkouts-${grp[0].id}`}
+                              checked={grp.every(c => copySettings[c.id]?.checkouts_enabled !== false)}
+                              onChange={(e) => {
+                                const val = e.target.checked;
+                                grp.forEach(c => handleCopySettingUpdate(c.id, 'checkouts_enabled', val));
+                              }}
+                              className="h-4 w-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500"
+                            />
+                            <label htmlFor={`checkouts-${grp[0].id}`} className="text-sm text-slate-700">Allow checkouts</label>
+                          </div>
+                        </div>
+                        {/* Per-copy individual toggles with Save buttons */}
+                        <div className="pt-2 border-t border-slate-100">
+                          <p className="text-xs font-medium text-slate-500 mb-2">Individual copy toggles:</p>
+                          <div className="space-y-2">
+                            {grp.map(c => {
+                              const s = copySettings[c.id] || { public: true, holds_enabled: true, checkouts_enabled: true };
+                              return (
+                                <div key={c.id} className="flex flex-wrap items-center gap-3 px-3 py-2 bg-slate-50 rounded-lg text-xs">
+                                  <span className="text-slate-500 font-mono w-20">#{String(c.id).slice(0, 8)}</span>
+                                  <label className="flex items-center gap-1"><input type="checkbox" checked={s.public} onChange={(e) => handleCopySettingUpdate(c.id, 'public', e.target.checked)} className="h-3 w-3 rounded border-slate-300 text-indigo-600" /> Pub</label>
+                                  <label className="flex items-center gap-1"><input type="checkbox" checked={s.holds_enabled} onChange={(e) => handleCopySettingUpdate(c.id, 'holds_enabled', e.target.checked)} className="h-3 w-3 rounded border-slate-300 text-indigo-600" /> Holds</label>
+                                  <label className="flex items-center gap-1"><input type="checkbox" checked={s.checkouts_enabled} onChange={(e) => handleCopySettingUpdate(c.id, 'checkouts_enabled', e.target.checked)} className="h-3 w-3 rounded border-slate-300 text-indigo-600" /> Checkouts</label>
+                                  {savingCopies[c.id] && <span className="text-indigo-500">…</span>}
+                                </div>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </section>
+            );
+          })()}
 
           {/* Copy Management */}
           {copies.length > 0 && (
