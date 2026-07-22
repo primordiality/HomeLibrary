@@ -16,7 +16,8 @@ interface Availability {
 function CatalogContent() {
   const searchParams = useSearchParams();
   const router = useRouter();
-  const { user } = useAuth();
+  const { user, profile } = useAuth();
+  const isStaff = profile?.role && ['system_admin', 'library_owner', 'librarian'].includes(profile.role);
   const activeLibId = searchParams.get('library') ?? '';
 
   const [books, setBooks] = useState([]);
@@ -27,6 +28,7 @@ function CatalogContent() {
   const [libraries, setLibraries] = useState([]);
   const [showFilters, setShowFilters] = useState(false);
   const [userHoldsByBook, setUserHoldsByBook] = useState<Record<string, boolean>>({});
+  const [visibilityFilter, setVisibilityFilter] = useState<'public' | 'all'>('public');
 
   // Load libraries once on mount
   useEffect(() => {
@@ -37,11 +39,11 @@ function CatalogContent() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Refresh catalog when library or search changes
+  // Refresh catalog when library, visibility, or search changes
   useEffect(() => {
     loadCatalog(activeLibId, searchQuery);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeLibId, searchQuery]);
+  }, [activeLibId, searchQuery, visibilityFilter]);
 
   // Load user's active holds to show indicator on cards
   useEffect(() => {
@@ -70,7 +72,7 @@ function CatalogContent() {
     loadUserHolds();
   }, [user]);
 
-  async function loadCatalog(libId: string, query: string) {
+  async function loadCatalog(libId: string, query: string, vis: string = 'public') {
     setLoading(true);
     try {
         const [{ data: copies, error: cErr },
@@ -82,10 +84,16 @@ function CatalogContent() {
         if (cErr) console.error('copies query failed:', cErr);
         if (bErr) console.error('books query failed:', bErr);
 
-        // Filter copies by library (if a library is selected)
+        // Filter copies by library (if a library is selected) and by visibility
         const copiesToConsider = libId
             ? (copies || []).filter((c: any) => c.library_id === libId)
             : (copies || []);
+
+        // Respect visibility filter: hide non-public copies unless staff with "all"
+        const showAllVisibility = isStaff && vis === 'all';
+        const copiesFiltered = showAllVisibility
+            ? copiesToConsider
+            : copiesToConsider.filter((c: any) => c.public !== false);
 
         // Load borrows to compute availability
         const { data: borrows, error: borrowsErr } = await supabase
@@ -98,7 +106,7 @@ function CatalogContent() {
         const availMap: Record<string, Availability> = {};
         const bookIdsSet = new Set<string>();
 
-        for (const copy of copiesToConsider) {
+        for (const copy of copiesFiltered) {
             const bookId = copy.book_id;
             if (!bookId) continue;
             bookIdsSet.add(bookId);
@@ -112,7 +120,7 @@ function CatalogContent() {
         for (const borrow of (borrows || [])) {
             const copyId = borrow.copy_id;
             // Find which book this copy belongs to
-            const copy = copiesToConsider.find((c: any) => c.id === copyId);
+            const copy = copiesFiltered.find((c: any) => c.id === copyId);
             if (copy && copy.book_id && availMap[copy.book_id]) {
                 availMap[copy.book_id].checkedOut++;
             }
@@ -127,14 +135,27 @@ function CatalogContent() {
         setAvailabilityMap(availMap);
 
         // Build entries from copies (each unique book_id gets one entry)
+        // When browsing a single library, one copy per book. When "all libraries",
+        // collect per-library settings for each book.
         const entries: any[] = [];
         const seenBookIds = new Set<string>();
         const bookIds: string[] = [];
+        // Accumulate per-copy settings per book_id
+        const bookSettingsMap: Record<string, any[]> = {};
 
-        for (const copy of copiesToConsider) {
+        for (const copy of copiesFiltered) {
             const bookId = copy.book_id;
-            
-            if (bookId && !seenBookIds.has(bookId)) {
+            if (!bookId) continue;
+
+            if (!bookSettingsMap[bookId]) bookSettingsMap[bookId] = [];
+            bookSettingsMap[bookId].push({
+                public: copy.public,
+                holds_enabled: copy.holds_enabled,
+                checkouts_enabled: copy.checkouts_enabled,
+                library_id: copy.library_id,
+            });
+
+            if (!seenBookIds.has(bookId)) {
                 seenBookIds.add(bookId);
                 bookIds.push(bookId);
             }
@@ -153,7 +174,7 @@ function CatalogContent() {
             }
         }
 
-        for (const copy of copiesToConsider) {
+        for (const copy of copiesFiltered) {
             const bookId = copy.book_id;
             if (!bookId) continue;
             
@@ -170,6 +191,7 @@ function CatalogContent() {
                 isbn: (book as any)?.isbn ?? null,
                 library_id: copy.library_id,
                 availability: avail,
+                copy_settings: bookSettingsMap[bookId],
             });
         }
 
@@ -249,9 +271,26 @@ function CatalogContent() {
           />
         </div>
 
-        {/* Filter Panel (collapsible) — library selector + cross-library links */}
+        {/* Filter Panel (collapsible) — visibility, library selector + cross-library links */}
         {showFilters && (
           <div className="rounded-xl border border-slate-200 bg-slate-50 p-5 space-y-4">
+            {/* Visibility Selector */}
+            {isStaff && (
+              <div>
+                <label htmlFor="catalog-visibility" className="block text-sm font-medium text-slate-700 mb-1">
+                  Show:
+                </label>
+                <select
+                  id="catalog-visibility"
+                  value={visibilityFilter}
+                  onChange={(e) => setVisibilityFilter(e.target.value as 'public' | 'all')}
+                  className="w-full sm:w-72 rounded-lg border border-slate-300 px-4 py-2 text-sm focus:border-indigo-500 focus:ring-indigo-500"
+                >
+                  <option value="public">Public Only</option>
+                  <option value="all">All Books</option>
+                </select>
+              </div>
+            )}
             {/* Library Selector */}
             <div>
               <label htmlFor="catalog-library" className="block text-sm font-medium text-slate-700 mb-1">
@@ -370,6 +409,32 @@ function CatalogContent() {
                       <span className="inline-block mt-2 rounded-md bg-indigo-100 px-2 py-0.5 text-xs font-medium text-indigo-700">
                         You have a hold
                       </span>
+                    )}
+
+                    {/* Staff-only badges */}
+                    {isStaff && book.copy_settings && (
+                      <>
+                        {/* "Private" badge if any copy is non-public */}
+                        {book.copy_settings.some((s: any) => s.public === false) && (
+                          <span className="inline-block mt-2 rounded-md bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-700">
+                            🔒 Private
+                          </span>
+                        )}
+                        {/* "No Holds" badge if all copies have holds disabled */}
+                        {book.copy_settings.length > 0 &&
+                          book.copy_settings.every((s: any) => s.holds_enabled === false) && (
+                          <span className="inline-block mt-2 rounded-md bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-700">
+                            No Holds
+                          </span>
+                        )}
+                        {/* "No Checkouts" badge if all copies have checkouts disabled */}
+                        {book.copy_settings.length > 0 &&
+                          book.copy_settings.every((s: any) => s.checkouts_enabled === false) && (
+                          <span className="inline-block mt-2 rounded-md bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-700">
+                            No Checkouts
+                          </span>
+                        )}
+                      </>
                     )}
                   </div>
 

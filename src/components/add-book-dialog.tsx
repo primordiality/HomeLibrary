@@ -390,6 +390,9 @@ const AddBookDialogComponent = forwardRef<
         purchase_price: null,
         acquired_date: new Date().toISOString().split('T')[0],
         notes: null,
+        public: true,
+        holds_enabled: true,
+        checkouts_enabled: true,
       });
 
       setStep('saved');

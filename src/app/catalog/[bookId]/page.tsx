@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import { supabase } from '@/lib/supabase/client';
+import { getBookSettings, BookSettings } from '@/lib/book-settings';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/contexts/AuthContext';
@@ -45,6 +46,9 @@ export default function BookDetailPage({ params }: { params: { bookId: string } 
   const [borrowSuccess, setBorrowSuccess] = useState<string | null>(null);
   const [borrowError, setBorrowError] = useState<string | null>(null);
 
+  // Book settings
+  const [bookSettings, setBookSettings] = useState<BookSettings | null>(null);
+
   const bookId = params.bookId;
 
   useEffect(() => {
@@ -68,7 +72,16 @@ export default function BookDetailPage({ params }: { params: { bookId: string } 
         .from('book_copies')
         .select('*')
         .eq('book_id', bookId);
-      if (copiesData) setCopies(copiesData);
+      if (copiesData) {
+        setCopies(copiesData);
+
+        // Load book settings (first copy is representative)
+        const libraryId = copiesData.length > 0 ? copiesData[0].library_id : '';
+        if (libraryId) {
+          const settings = await getBookSettings(bookId, libraryId);
+          setBookSettings(settings);
+        }
+      }
 
       // Load active borrows (no return_date)
       const copyIds = copiesData?.map((c: any) => c.id) || [];
@@ -304,11 +317,11 @@ export default function BookDetailPage({ params }: { params: { bookId: string } 
   // Get an available copy for the borrow button
   const availableCopy = copiesWithStatus.find((c) => c.status === 'available');
 
-  if (loading || authLoading) return <p className="text-sm text-slate-500">Loading...</p>;
-  if (!book) return <p className="text-red-600">Book not found.</p>;
-
   const isPatron = profile?.role === 'patron';
   const isStaff = profile?.role && ['system_admin', 'library_owner', 'librarian'].includes(profile.role);
+
+  if (loading || authLoading) return <p className="text-sm text-slate-500">Loading...</p>;
+  if (!book) return <p className="text-red-600">Book not found.</p>;
 
   return (
     <div className="max-w-4xl mx-auto space-y-8">
@@ -338,8 +351,21 @@ export default function BookDetailPage({ params }: { params: { bookId: string } 
         </div>
       </header>
 
+      {/* Not available banner */}
+      {bookSettings && !bookSettings.public && (
+        <div className="rounded-xl border border-red-200 bg-red-50 p-4">
+          <p className="text-sm text-red-700 font-medium">This book is not available</p>
+          <Link
+            href="/catalog"
+            className="mt-2 inline-block text-sm text-indigo-600 hover:text-indigo-800 font-medium"
+          >
+            Browse catalog →
+          </Link>
+        </div>
+      )}
+
       {/* Patron Borrow Section */}
-      {isPatron && user && !allCheckedOut && !userHasBook && availableCopy && (
+      {isPatron && user && bookSettings?.checkouts_enabled !== false && !allCheckedOut && !userHasBook && availableCopy && (
         <div className="rounded-xl border border-indigo-200 bg-indigo-50 p-4">
           <div className="flex items-center justify-between">
             <div>
@@ -360,6 +386,13 @@ export default function BookDetailPage({ params }: { params: { bookId: string } 
           {borrowError && (
             <p className="mt-2 text-sm text-red-600">{borrowError}</p>
           )}
+        </div>
+      )}
+
+      {/* Checkouts not available */}
+      {isPatron && user && bookSettings?.checkouts_enabled === false && !userHasBook && (
+        <div className="rounded-xl border border-amber-200 bg-amber-50 p-4">
+          <p className="text-sm text-amber-800">This book is not available for checkouts.</p>
         </div>
       )}
 
@@ -450,7 +483,7 @@ export default function BookDetailPage({ params }: { params: { bookId: string } 
         </div>
 
         {/* Place Hold button - patrons only when all checked out */}
-        {isPatron && allCheckedOut && !userHasHold && (
+        {isPatron && allCheckedOut && !userHasHold && bookSettings?.holds_enabled !== false && (
           <div>
             {!user ? (
               <div className="rounded-lg bg-slate-50 border border-slate-200 p-4 text-center">
@@ -486,6 +519,13 @@ export default function BookDetailPage({ params }: { params: { bookId: string } 
                 )}
               </div>
             )}
+          </div>
+        )}
+
+        {/* Holds not available notice */}
+        {isPatron && user && allCheckedOut && !userHasHold && bookSettings?.holds_enabled === false && (
+          <div className="rounded-lg bg-slate-50 border border-slate-200 p-4">
+            <p className="text-sm text-slate-600">Holds are not available for this book.</p>
           </div>
         )}
 
