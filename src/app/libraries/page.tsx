@@ -326,39 +326,37 @@ export default function LibrariesPage() {
                        ) : libraries.length > 0 ? (
                             <div className="space-y-4">
                                 {libraries.map((lib) => {
-                                    const isAuthorized = !authorizedLibraryIds || authorizedLibraryIds.has(lib.id)
-                                    return (
-                                  <div key={lib.id} className="flex items-center justify-between rounded-xl border border-slate-200 bg-white p-6 shadow-sm transition hover:shadow-md">
-                                      <div className="flex-1 min-w-0">
-                                          <Link href={`/catalog?library=${lib.id}`} className="font-semibold text-indigo-600 hover:text-indigo-800 text-sm font-medium">
-                                         {lib.name} <span className="text-slate-500">({lib.description || 'No description'})</span>
-                                      </Link>
-                                      <p className="text-xs text-slate-400 mt-1">
-                                          Owner: {(lib as LibraryWithCounts)._ownerName || '—'}
-                                      </p>
-                                     </div>
-                                       <div className="flex items-center gap-3 ml-4">
-                                  <span className="text-xs text-slate-400 mr-2">Books: {(lib as LibraryWithCounts)._bookCount ?? 0}</span>
-                                  {isAuthorized && (<>
-                                   <Link
-                                      href={`/libraries/${lib.id}/manage-books`}
-                                         className="rounded-lg bg-white border border-slate-300 px-3 py-1.5 text-sm font-medium text-slate-600 hover:bg-slate-50"
-                                     >
-                                        Manage Books
-                                      </Link>
-                                       <Link
-                                          href={`/libraries/${lib.id}/edit`}
-                                             className="rounded-lg bg-white border border-indigo-300 px-3 py-1.5 text-sm font-medium text-indigo-600 hover:bg-indigo-50"
-                                     >
-                                        Edit Library
-                                      </Link>
-                                  </>)}
-                                  {!isAuthorized && (
-                                      <span className="text-xs text-slate-400 italic">Manage Books &ndash; no access</span>
-                                  )}
-                                  </div>
-                               </div>
-                                 )})}
+                                                    const isOwner = user && lib.owner_id === user.id
+                                                    const isAuthorized = !authorizedLibraryIds || authorizedLibraryIds.has(lib.id) || isOwner
+                                                    return (
+                                                  <div key={lib.id} className="flex items-center justify-between rounded-xl border border-slate-200 bg-white p-6 shadow-sm transition hover:shadow-md">
+                                                      <div className="flex-1 min-w-0">
+                                                          <Link href={`/catalog?library=${lib.id}`} className="font-semibold text-indigo-600 hover:text-indigo-800 text-sm font-medium">
+                                                         {lib.name} <span className="text-slate-500">({lib.description || 'No description'})</span>
+                                                      </Link>
+                                                      <p className="text-xs text-slate-400 mt-1">
+                                                          Owner: {(lib as LibraryWithCounts)._ownerName || '—'}
+                                                      </p>
+                                                     </div>
+                                                       <div className="flex items-center gap-3 ml-4">
+                                                  <span className="text-xs text-slate-400 mr-2">Books: {(lib as LibraryWithCounts)._bookCount ?? 0}</span>
+                                                  {isAuthorized && (<>
+                                                   <Link
+                                                      href={`/libraries/${lib.id}/manage-books`}
+                                                         className="rounded-lg bg-white border border-slate-300 px-3 py-1.5 text-sm font-medium text-slate-600 hover:bg-slate-50"
+                                                     >
+                                                        Manage Books
+                                                      </Link>
+                                                       <Link
+                                                          href={`/libraries/${lib.id}/edit`}
+                                                             className="rounded-lg bg-white border border-indigo-300 px-3 py-1.5 text-sm font-medium text-indigo-600 hover:bg-indigo-50"
+                                                     >
+                                                        Edit Library
+                                                      </Link>
+                                                  </>)}
+                                                  </div>
+                                               </div>
+                                                 )})}
                               </div>
                         ) : (
                             <div className="rounded-xl border border-dashed border-slate-300 p-12 text-center">
