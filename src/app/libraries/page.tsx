@@ -13,9 +13,11 @@ interface LibraryWithCounts extends Library {
 
 export default function LibrariesPage() {
     let _user: any = null
+    let _profile: any = null
     let _loading: boolean = true
-    try { const ctx = useAuth(); _user = ctx.user; _loading = ctx.loading || false } catch {}
+    try { const ctx = useAuth(); _user = ctx.user; _profile = ctx.profile; _loading = ctx.loading || false } catch {}
     const user = _user
+    const profile = _profile
     const authLoading = _loading
     const [libraries, setLibraries] = useState<LibraryWithCounts[]>([])
     const [loadingData, setLoadingData] = useState(false)
@@ -26,10 +28,38 @@ export default function LibrariesPage() {
     const [phone, setPhone] = useState('')
     const [submitting, setSubmitting] = useState(false)
     const [errorMessage, setErrorMessage] = useState<string | null>(null)
+    const [authorizedLibraryIds, setAuthorizedLibraryIds] = useState<Set<string> | null>(null)
+    const [loadingAuth, setLoadingAuth] = useState(true)
+
+    // Load user's authorized libraries
+    useEffect(() => {
+        if (!user || !profile) return
+        async function loadAuthorizedLibraries() {
+            if (profile.role === 'system_admin') {
+                // System admins can access all libraries
+                setAuthorizedLibraryIds(null) // null = all allowed
+            } else {
+                const { data: memberships } = await supabase
+                    .from('library_members')
+                    .select('library_id')
+                    .eq('user_id', user.id)
+                    .in('role', ['library_owner', 'librarian'])
+                if (memberships) {
+                    setAuthorizedLibraryIds(new Set(memberships.map(m => m.library_id)))
+                } else {
+                    setAuthorizedLibraryIds(new Set())
+                }
+            }
+            setLoadingAuth(false)
+        }
+        loadAuthorizedLibraries()
+    }, [user, profile])
 
      // Load libraries from Supabase on mount
     useEffect(() => {
         if (!user) return
+        // Wait for authorizedLibraryIds to be loaded
+        if (profile && authorizedLibraryIds === null && authorizedLibraryIds !== undefined) return
         async function loadLibraries() {
             setLoadingData(true)
             try {
@@ -66,11 +96,19 @@ export default function LibrariesPage() {
                  )
 
                 setLibraries(
-                    data.map((lib) => ({
-                         ...lib,
-                         _bookCount: countsMap.get(String(lib.id)),
-                         _ownerName: ownersMap.get(String(lib.id)),
-                    }))
+                    data
+                        .filter((lib) => {
+                            // If not null, user only sees their authorized libraries
+                            if (authorizedLibraryIds) {
+                                return authorizedLibraryIds.has(lib.id)
+                            }
+                            return true
+                        })
+                        .map((lib) => ({
+                             ...lib,
+                             _bookCount: countsMap.get(String(lib.id)),
+                             _ownerName: ownersMap.get(String(lib.id)),
+                        }))
                  )
              } catch (err) {
                 console.error(err)
@@ -82,7 +120,7 @@ export default function LibrariesPage() {
      }, [user])
 
      // Always show loading state for auth
-    if (authLoading) {
+    if (authLoading || loadingAuth) {
         return <p className="text-sm text-slate-500">Loading...</p>
      }
 
@@ -287,7 +325,9 @@ export default function LibrariesPage() {
                            <p className="text-sm text-slate-500">Loading...</p>
                        ) : libraries.length > 0 ? (
                             <div className="space-y-4">
-                                {libraries.map((lib) => (
+                                {libraries.map((lib) => {
+                                    const isAuthorized = !authorizedLibraryIds || authorizedLibraryIds.has(lib.id)
+                                    return (
                                   <div key={lib.id} className="flex items-center justify-between rounded-xl border border-slate-200 bg-white p-6 shadow-sm transition hover:shadow-md">
                                       <div className="flex-1 min-w-0">
                                           <Link href={`/catalog?library=${lib.id}`} className="font-semibold text-indigo-600 hover:text-indigo-800 text-sm font-medium">
@@ -299,6 +339,7 @@ export default function LibrariesPage() {
                                      </div>
                                        <div className="flex items-center gap-3 ml-4">
                                   <span className="text-xs text-slate-400 mr-2">Books: {(lib as LibraryWithCounts)._bookCount ?? 0}</span>
+                                  {isAuthorized && (<>
                                    <Link
                                       href={`/libraries/${lib.id}/manage-books`}
                                          className="rounded-lg bg-white border border-slate-300 px-3 py-1.5 text-sm font-medium text-slate-600 hover:bg-slate-50"
@@ -311,9 +352,13 @@ export default function LibrariesPage() {
                                      >
                                         Edit Library
                                       </Link>
+                                  </>)}
+                                  {!isAuthorized && (
+                                      <span className="text-xs text-slate-400 italic">Manage Books &ndash; no access</span>
+                                  )}
                                   </div>
                                </div>
-                                 ))}
+                                 )})}
                               </div>
                         ) : (
                             <div className="rounded-xl border border-dashed border-slate-300 p-12 text-center">

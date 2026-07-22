@@ -4,18 +4,22 @@ import { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { useParams, useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabase/client';
+import { useAuth } from '@/contexts/AuthContext';
 import AddBookDialog from '@/components/add-book-dialog';
 
 export default function ManageBooksPage() {
   const params = useParams<{ id: string }>();
   const router = useRouter();
   const libraryId: string = typeof params?.id === 'string' ? params.id : '';
+  const { user, profile } = useAuth();
+  const [loading, setLoading] = useState(true);
+  const [accessDenied, setAccessDenied] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
-    // Local state
+  // Local state
   const [library, setLibrary] = useState<any>(null);
   const [books, setBooks] = useState<any[]>([]);
   const [otherLibraries, setOtherLibraries] = useState<any[]>([]);
-  const [loading, setLoading] = useState(true);
 
     // Actions
   const [moving, setMoving] = useState(false);
@@ -47,6 +51,24 @@ export default function ManageBooksPage() {
 
       async function loadAll() {
      setLoading(true);
+
+         // ─── Authorization check ─────────────────────
+     if (profile?.role !== 'system_admin') {
+        // library_owner & librarian: check library_members
+        const { data: memberships } = await supabase
+          .from('library_members')
+          .select('id')
+          .eq('user_id', user?.id)
+          .eq('library_id', libraryId)
+          .in('role', ['library_owner', 'librarian'])
+          .limit(1);
+
+        if (!memberships || memberships.length === 0) {
+          setAccessDenied(true);
+          setLoading(false);
+          return;
+        }
+      }
 
          // This library
        const { data: lib } = await supabase
@@ -272,6 +294,24 @@ export default function ManageBooksPage() {
 
        // ─── Loading guard ──────────────────────────
    if (loading) return <p className="text-sm text-slate-500">Loading...</p>;
+   if (accessDenied) {
+     return (
+       <div className="space-y-6">
+         <header>
+           <h1 className="text-3xl font-bold text-slate-900">Access Denied</h1>
+         </header>
+         <div className="rounded-xl border border-red-200 bg-red-50 p-6">
+           <h2 className="text-lg font-semibold text-red-800">You don't have permission to manage books in this library.</h2>
+           <p className="mt-2 text-sm text-red-700">
+             Library owners and librarians can only manage books in libraries they're assigned to.
+           </p>
+           <Link href="/libraries" className="mt-4 inline-block rounded-lg bg-red-600 px-4 py-2 text-sm font-medium text-white hover:bg-red-700">
+             Back to Libraries
+           </Link>
+         </div>
+       </div>
+     );
+   }
    if (!library) return <p className="text-sm text-slate-500">Library not found.</p>;
 
    const otherOptions = otherLibraries.map((l: any) => ({ value: l.id, label: l.name }));
