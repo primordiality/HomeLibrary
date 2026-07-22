@@ -22,43 +22,32 @@ export default function LibrariesPage() {
     const [phone, setPhone] = useState('')
     const [submitting, setSubmitting] = useState(false)
     const [errorMessage, setErrorMessage] = useState<string | null>(null)
-    const [authorizedLibraryIds, setAuthorizedLibraryIds] = useState<Set<string> | null | undefined>(undefined)
-    const [loadingAuth, setLoadingAuth] = useState(true)
+    const [canManageAll, setCanManageAll] = useState<boolean | null>(null)
 
-    // Load user's authorized libraries
+    // Single effect: fetch authorized libraries AND load libraries list
     useEffect(() => {
         if (!user || !profile) return
-        async function loadAuthorizedLibraries() {
-            if (profile.role === 'system_admin') {
-                // System admins can access all libraries
-                setAuthorizedLibraryIds(null) // null = all allowed
-            } else {
-                const { data: memberships } = await supabase
-                    .from('library_members')
-                    .select('library_id')
-                    .eq('user_id', user.id)
-                    .in('role', ['library_owner', 'librarian'])
-                if (memberships) {
-                    setAuthorizedLibraryIds(new Set(memberships.map(m => m.library_id)))
-                } else {
-                    setAuthorizedLibraryIds(new Set())
-                }
-            }
-            setLoadingAuth(false)
-        }
-        loadAuthorizedLibraries()
-    }, [user, profile])
 
-    // Load libraries from Supabase once auth is ready
-    useEffect(() => {
-        if (!user) return
-        if (authLoading || loadingAuth) return
-        // undefined = auth not resolved yet
-        if (authorizedLibraryIds === undefined) return
-
-        async function loadLibraries() {
+        async function loadData() {
             setLoadingData(true)
             try {
+                // Determine which libraries user can access
+                let allowedIds: Set<string> | null = null // null = all
+                if (profile.role !== 'system_admin') {
+                    const { data: memberships } = await supabase
+                        .from('library_members')
+                        .select('library_id')
+                        .eq('user_id', user.id)
+                        .in('role', ['library_owner', 'librarian'])
+                    if (memberships) {
+                        allowedIds = new Set(memberships.map(m => m.library_id))
+                    } else {
+                        allowedIds = new Set()
+                    }
+                }
+                setCanManageAll(allowedIds === null)
+
+                // Fetch libraries from Supabase
                 const { data } = await supabase
                      .from('libraries')
                      .select('*')
@@ -67,7 +56,7 @@ export default function LibrariesPage() {
 
                 if (!data) return
 
-                 // Fetch book counts and owner names for each library
+                // Fetch book counts and owner names
                 const countsMap = new Map()
                 const ownersMap = new Map<string, string>()
                 await Promise.all(
@@ -91,16 +80,13 @@ export default function LibrariesPage() {
                      })
                  )
 
+                // Filter: show if user is allowed to manage OR is the owner
                 setLibraries(
                     data
                         .filter((lib) => {
-                            // If null, user can see all libraries (system admin)
-                            // If Set with entries, filter to authorized
-                            // If empty Set, user has no libraries
-                            if (authorizedLibraryIds === null) {
-                                return true
-                            }
-                            return authorizedLibraryIds.has(lib.id)
+                            if (allowedIds === null) return true           // system admin
+                            if (allowedIds.has(lib.id)) return true        // in library_members
+                            return lib.owner_id === user.id                // owns the library
                         })
                         .map((lib) => ({
                              ...lib,
@@ -114,15 +100,15 @@ export default function LibrariesPage() {
                 setLoadingData(false)
              }
          }
-        loadLibraries()
-     }, [user, authLoading, loadingAuth, authorizedLibraryIds])
+        loadData()
+     }, [user, profile])
 
-     // Always show loading state for auth
-    if (authLoading || loadingAuth) {
+    // Loading state
+    if (authLoading) {
         return <p className="text-sm text-slate-500">Loading...</p>
      }
 
-     // If NOT signed in, explain why and link to signin page
+     // If NOT signed in
     if (!user) {
         return (
              <div className="space-y-6">
@@ -324,8 +310,7 @@ export default function LibrariesPage() {
                        ) : libraries.length > 0 ? (
                             <div className="space-y-4">
                                 {libraries.map((lib) => {
-                                    const isOwner = user && lib.owner_id === user.id
-                                    const isAuthorized = !authorizedLibraryIds || authorizedLibraryIds.has(lib.id) || isOwner
+                                    const hasAccess = (canManageAll !== null && canManageAll) || lib.owner_id === user.id
                                     return (
                                   <div key={lib.id} className="flex items-center justify-between rounded-xl border border-slate-200 bg-white p-6 shadow-sm transition hover:shadow-md">
                                       <div className="flex-1 min-w-0">
@@ -338,7 +323,7 @@ export default function LibrariesPage() {
                                      </div>
                                        <div className="flex items-center gap-3 ml-4">
                                   <span className="text-xs text-slate-400 mr-2">Books: {(lib as LibraryWithCounts)._bookCount ?? 0}</span>
-                                  {isAuthorized && (<>
+                                  {hasAccess && (<>
                                    <Link
                                       href={`/libraries/${lib.id}/manage-books`}
                                          className="rounded-lg bg-white border border-slate-300 px-3 py-1.5 text-sm font-medium text-slate-600 hover:bg-slate-50"
