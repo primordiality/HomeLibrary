@@ -1173,6 +1173,37 @@ function StaffDashboard() {
 export default function Dashboard() {
   const { user, profile, loading: authLoading } = useAuth();
   const router = useRouter();
+  const [isAdmin, setIsAdmin] = useState(false);
+
+  useEffect(() => {
+    if (!user) {
+      setIsAdmin(false);
+      return;
+    }
+
+    async function checkAccess() {
+      // system_admin always gets staff dashboard
+      if (profile?.role === 'system_admin') {
+        setIsAdmin(true);
+        return;
+      }
+
+      // Check if user manages any library (regardless of profile role)
+      const { data: members } = await supabase
+        .from('library_members')
+        .select('library_id')
+        .eq('user_id', user.id)
+        .in('role', ['library_owner', 'librarian']);
+
+      if (members && members.length > 0) {
+        setIsAdmin(true);
+      } else {
+        setIsAdmin(false);
+      }
+    }
+
+    checkAccess();
+  }, [user, profile]);
 
   useEffect(() => {
     if (!authLoading && !user) {
@@ -1195,11 +1226,11 @@ export default function Dashboard() {
     return null;
   }
 
-  // Route patrons to their dashboard
-  if (profile?.role === 'patron') {
-    return <PatronDashboard />;
+  // Library staff and system_admin get the staff dashboard
+  if (isAdmin) {
+    return <StaffDashboard />;
   }
 
-  // All other roles (system_admin, library_owner, librarian) get the staff dashboard
-  return <StaffDashboard />;
+  // All other users (patrons) get the patron dashboard
+  return <PatronDashboard />;
 }
