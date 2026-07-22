@@ -8,6 +8,7 @@ import type { Library } from '@/types/db'
 
 interface LibraryWithCounts extends Library {
      _bookCount?: number
+     _ownerName?: string
 }
 
 export default function LibrariesPage() {
@@ -40,8 +41,9 @@ export default function LibrariesPage() {
 
                 if (!data) return
 
-                 // Fetch book counts for each library in parallel
+                 // Fetch book counts and owner names for each library
                 const countsMap = new Map()
+                const ownersMap = new Map<string, string>()
                 await Promise.all(
                     data.map(async (lib) => {
                         const { count } = await supabase
@@ -49,6 +51,17 @@ export default function LibrariesPage() {
                              .select('*', { count: 'exact', head: true })
                              .eq('library_id', lib.id)
                         countsMap.set(String(lib.id), count ?? 0)
+
+                        if (lib.owner_id) {
+                            const { data: owner } = await supabase
+                                 .from('profiles')
+                                 .select('name')
+                                 .eq('id', lib.owner_id)
+                                 .maybeSingle()
+                            if (owner?.name) {
+                                ownersMap.set(String(lib.id), owner.name)
+                            }
+                        }
                      })
                  )
 
@@ -56,6 +69,7 @@ export default function LibrariesPage() {
                     data.map((lib) => ({
                          ...lib,
                          _bookCount: countsMap.get(String(lib.id)),
+                         _ownerName: ownersMap.get(String(lib.id)),
                     }))
                  )
              } catch (err) {
@@ -279,6 +293,9 @@ export default function LibrariesPage() {
                                           <Link href={`/catalog?library=${lib.id}`} className="font-semibold text-indigo-600 hover:text-indigo-800 text-sm font-medium">
                                          {lib.name} <span className="text-slate-500">({lib.description || 'No description'})</span>
                                       </Link>
+                                      <p className="text-xs text-slate-400 mt-1">
+                                          Owner: {(lib as LibraryWithCounts)._ownerName || '—'}
+                                      </p>
                                      </div>
                                        <div className="flex items-center gap-3 ml-4">
                                   <span className="text-xs text-slate-400 mr-2">Books: {(lib as LibraryWithCounts)._bookCount ?? 0}</span>
