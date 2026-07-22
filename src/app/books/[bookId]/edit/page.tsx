@@ -132,6 +132,7 @@ export default function EditBookPage() {
       pages: parseInt(pagesStr, 10) || null,
       notes: notes.trim() || null,
       isbn: isbn.trim() || null,
+      cover_url: coverUrl || null,
     };
     setSaving(true);
     setErrorStr(null);
