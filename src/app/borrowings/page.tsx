@@ -92,7 +92,7 @@ function BorrowingsContent() {
           map[item.id] = item.name || item.email || 'Unnamed';
          }
         setPatronMap(map);
-        // Include all profiles (patrons + staff) for checkout selection
+        // Load ALL profiles for checkout selection (patrons + staff)
         setPatronsAll(p);
        }
      } catch (e: any) { 
@@ -856,41 +856,33 @@ function BorrowingsContent() {
                          {patronMap[currentUserPatronId] || currentUser?.email || 'Unknown'}
                        </div>
                      ) : (
-                       <>
-                         <div className="relative">
-                           <input
-                             type="text"
-                             value={patronSearchQuery}
-                             onChange={(e) => handleSearchPatrons(e.target.value)}
-                             placeholder="Search name, email, or role..."
-                             className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-indigo-500 focus:ring-indigo-500"
-                           />
-                           {patronSearchResults.length > 0 && (
-                             <ul className="mt-1 absolute z-10 w-full bg-white border border-slate-200 rounded-lg max-h-48 overflow-y-auto shadow-lg">
-                               {patronSearchResults.map((ptn) => (
-                                 <li key={ptn.id}>
-                                   <button
-                                     onClick={() => handleSelectPatron(ptn.id)}
-                                     className="w-full text-left px-3 py-2 text-sm hover:bg-indigo-50 flex items-center justify-between"
-                                   >
-                                     <div>
-                                       <span className="text-slate-900">{ptn.name || ptn.email}</span>
-                                       <span className="text-xs text-slate-400 ml-2">({ptn.email})</span>
-                                     </div>
-                                     <span className="text-xs text-slate-500">{ptn.role || 'patron'}</span>
-                                   </button>
-                                 </li>
-                               ))}
-                             </ul>
-                           )}
-                         </div>
-                         {checkoutPatron && !patronSearchQuery && (
-                           <div className="mt-1 flex items-center gap-2 rounded-lg border border-indigo-200 bg-indigo-50 px-3 py-2 text-sm text-slate-700">
-                             <span className="text-indigo-600">✓</span>
-                             <span className="font-medium">{patronMap[checkoutPatron] || 'Unknown'}</span>
-                           </div>
+                       <div className="relative">
+                         <input
+                           type="text"
+                           value={patronSearchQuery}
+                           onChange={(e) => handleSearchPatrons(e.target.value)}
+                           placeholder="Search name, email, or role..."
+                           className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-indigo-500 focus:ring-indigo-500"
+                         />
+                         {patronSearchResults.length > 0 && (
+                           <ul className="mt-1 absolute z-10 w-full bg-white border border-slate-200 rounded-lg max-h-48 overflow-y-auto shadow-lg">
+                             {patronSearchResults.map((ptn) => (
+                               <li key={ptn.id}>
+                                 <button
+                                   onClick={() => handleSelectPatron(ptn.id)}
+                                   className="w-full text-left px-3 py-2 text-sm hover:bg-indigo-50 flex items-center justify-between"
+                                 >
+                                   <div>
+                                     <span className="text-slate-900">{ptn.name || ptn.email}</span>
+                                     <span className="text-xs text-slate-400 ml-2">({ptn.email})</span>
+                                   </div>
+                                   <span className="text-xs text-slate-500">{ptn.role || 'patron'}</span>
+                                 </button>
+                               </li>
+                             ))}
+                           </ul>
                          )}
-                       </>
+                       </div>
                      )}
                    </div>
 
