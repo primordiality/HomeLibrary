@@ -35,6 +35,10 @@ function BorrowingsContent() {
   const [currentUserPatronId, setCurrentUserPatronId] = useState('');
   const [currentUserIsPatron, setCurrentUserIsPatron] = useState(false);
 
+  // Patron search state
+  const [patronSearchQuery, setPatronSearchQuery] = useState('');
+  const [patronSearchResults, setPatronSearchResults] = useState<any[]>([]);
+
   // Book settings for checkout modal
   const [bookSettings, setBookSettings] = useState<BookSettings | null>(null);
 
@@ -88,12 +92,35 @@ function BorrowingsContent() {
           map[item.id] = item.name || item.email || 'Unnamed';
          }
         setPatronMap(map);
-        setPatronsAll(p.filter((item: any) => item.role === 'patron' || !item.role));
+        // Include all profiles (patrons + staff) for checkout selection
+        setPatronsAll(p);
        }
      } catch (e: any) { 
       console.error('Failed to load patrons:', e.message); 
      }
    }
+
+  async function handleSearchPatrons(query: string) {
+    setPatronSearchQuery(query);
+    if (query.length < 2) {
+      setPatronSearchResults([]);
+      return;
+    }
+    const q = query.toLowerCase();
+    const filtered = patronsAll.filter((p: any) => {
+      const name = (p.name || '').toLowerCase();
+      const email = (p.email || '').toLowerCase();
+      const role = (p.role || '').toLowerCase();
+      return name.includes(q) || email.includes(q) || role.includes(q);
+    });
+    setPatronSearchResults(filtered.slice(0, 10));
+  }
+
+  async function handleSelectPatron(patronId: string) {
+    setCheckoutPatron(patronId);
+    setPatronSearchQuery(patronMap[patronId] || '');
+    setPatronSearchResults([]);
+  }
 
   async function loadBorrows() {
     try {
@@ -829,18 +856,41 @@ function BorrowingsContent() {
                          {patronMap[currentUserPatronId] || currentUser?.email || 'Unknown'}
                        </div>
                      ) : (
-                       <select
-                         value={checkoutPatron}
-                         onChange={(e) => setCheckoutPatron(e.target.value)}
-                         className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-indigo-500 focus:ring-indigo-500"
-                       >
-                         <option value="">Select a patron...</option>
-                         {patronsAll.map((ptn) => (
-                           <option key={String(ptn.id)} value={String(ptn.id)}>
-                             {ptn.name || ptn.email}
-                           </option>
-                         ))}
-                       </select>
+                       <>
+                         <div className="relative">
+                           <input
+                             type="text"
+                             value={patronSearchQuery}
+                             onChange={(e) => handleSearchPatrons(e.target.value)}
+                             placeholder="Search name, email, or role..."
+                             className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-indigo-500 focus:ring-indigo-500"
+                           />
+                           {patronSearchResults.length > 0 && (
+                             <ul className="mt-1 absolute z-10 w-full bg-white border border-slate-200 rounded-lg max-h-48 overflow-y-auto shadow-lg">
+                               {patronSearchResults.map((ptn) => (
+                                 <li key={ptn.id}>
+                                   <button
+                                     onClick={() => handleSelectPatron(ptn.id)}
+                                     className="w-full text-left px-3 py-2 text-sm hover:bg-indigo-50 flex items-center justify-between"
+                                   >
+                                     <div>
+                                       <span className="text-slate-900">{ptn.name || ptn.email}</span>
+                                       <span className="text-xs text-slate-400 ml-2">({ptn.email})</span>
+                                     </div>
+                                     <span className="text-xs text-slate-500">{ptn.role || 'patron'}</span>
+                                   </button>
+                                 </li>
+                               ))}
+                             </ul>
+                           )}
+                         </div>
+                         {checkoutPatron && !patronSearchQuery && (
+                           <div className="mt-1 flex items-center gap-2 rounded-lg border border-indigo-200 bg-indigo-50 px-3 py-2 text-sm text-slate-700">
+                             <span className="text-indigo-600">✓</span>
+                             <span className="font-medium">{patronMap[checkoutPatron] || 'Unknown'}</span>
+                           </div>
+                         )}
+                       </>
                      )}
                    </div>
 
