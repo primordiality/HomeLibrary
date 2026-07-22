@@ -61,7 +61,7 @@ function BorrowingsContent() {
           .select('*')
           .eq('id', user.id)
           .single();
-        if (profile && (profile.role === 'patron' || !profile.role)) {
+        if (profile) {
           setCurrentUserPatronId(user.id);
           setCheckoutPatron(user.id);
         }

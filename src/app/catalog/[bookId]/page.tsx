@@ -317,7 +317,7 @@ export default function BookDetailPage({ params }: { params: { bookId: string } 
   // Get an available copy for the borrow button
   const availableCopy = copiesWithStatus.find((c) => c.status === 'available');
 
-  const isPatron = profile?.role === 'patron';
+  const userIsAuthenticated = !!user;
   const isStaff = profile?.role && ['system_admin', 'library_owner', 'librarian'].includes(profile.role);
 
   if (loading || authLoading) return <p className="text-sm text-slate-500">Loading...</p>;
@@ -365,7 +365,7 @@ export default function BookDetailPage({ params }: { params: { bookId: string } 
       )}
 
       {/* Patron Borrow Section */}
-      {isPatron && user && bookSettings?.checkouts_enabled !== false && !allCheckedOut && !userHasBook && availableCopy && (
+      {userIsAuthenticated && user && bookSettings?.checkouts_enabled !== false && !allCheckedOut && !userHasBook && availableCopy && (
         <div className="rounded-xl border border-indigo-200 bg-indigo-50 p-4">
           <div className="flex items-center justify-between">
             <div>
@@ -390,14 +390,14 @@ export default function BookDetailPage({ params }: { params: { bookId: string } 
       )}
 
       {/* Checkouts not available */}
-      {isPatron && user && bookSettings?.checkouts_enabled === false && !userHasBook && (
+      {userIsAuthenticated && user && bookSettings?.checkouts_enabled === false && !userHasBook && (
         <div className="rounded-xl border border-amber-200 bg-amber-50 p-4">
           <p className="text-sm text-amber-800">This book is not available for checkouts.</p>
         </div>
       )}
 
       {/* Already have this book */}
-      {isPatron && user && userHasBook && (
+      {userIsAuthenticated && user && userHasBook && (
         <div className="rounded-xl border border-amber-200 bg-amber-50 p-4">
           <p className="text-sm font-medium text-amber-800">
             You already have this book checked out.
@@ -412,7 +412,7 @@ export default function BookDetailPage({ params }: { params: { bookId: string } 
       )}
 
       {/* Already have a hold */}
-      {isPatron && user && userHasHold && !userHasBook && (
+      {userIsAuthenticated && user && userHasHold && !userHasBook && (
         <div className="rounded-xl border border-amber-200 bg-amber-50 p-4">
           <p className="text-sm font-medium text-amber-800">
             You already have a hold on this book.
@@ -483,7 +483,7 @@ export default function BookDetailPage({ params }: { params: { bookId: string } 
         </div>
 
         {/* Place Hold button - patrons only when all checked out */}
-        {isPatron && allCheckedOut && !userHasHold && bookSettings?.holds_enabled !== false && (
+        {userIsAuthenticated && allCheckedOut && !userHasHold && bookSettings?.holds_enabled !== false && (
           <div>
             {!user ? (
               <div className="rounded-lg bg-slate-50 border border-slate-200 p-4 text-center">
@@ -523,14 +523,14 @@ export default function BookDetailPage({ params }: { params: { bookId: string } 
         )}
 
         {/* Holds not available notice */}
-        {isPatron && user && allCheckedOut && !userHasHold && bookSettings?.holds_enabled === false && (
+        {userIsAuthenticated && user && allCheckedOut && !userHasHold && bookSettings?.holds_enabled === false && (
           <div className="rounded-lg bg-slate-50 border border-slate-200 p-4">
             <p className="text-sm text-slate-600">Holds are not available for this book.</p>
           </div>
         )}
 
         {/* Already have a hold notice */}
-        {isPatron && user && userHasHold && (
+        {userIsAuthenticated && user && userHasHold && (
           <div className="rounded-lg bg-amber-50 border border-amber-200 p-4">
             <p className="text-sm text-amber-800 font-medium">You have a hold on this book</p>
             <p className="text-xs text-amber-600 mt-1">Check your dashboard to see the status of your hold.</p>
