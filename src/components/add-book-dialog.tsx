@@ -482,18 +482,27 @@ const AddBookDialogComponent = forwardRef<
   /* ═══════─ cover image download & upload ────── */
 
   async function downloadAndUploadCover(coverUrlStr: string): Promise<void> {
-    if (!coverUrlStr) {
-      setCoverStatus('No cover URL available');
-      return;
-    }
     setCoverLoading(true);
     setCoverStatus('Downloading cover…');
     try {
-      const imgRes = await fetch('/api/fetch-cover', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ url: coverUrlStr }),
-      });
+      let imgRes: Response;
+
+      if (!coverUrlStr && form.isbn?.trim()) {
+        // No cover URL but we have an ISBN — search covers by ISBN
+        imgRes = await fetch('/api/fetch-cover-by-isbn', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ isbn: form.isbn }),
+        });
+      } else {
+        // Use existing cover URL
+        imgRes = await fetch('/api/fetch-cover', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ url: coverUrlStr }),
+        });
+      }
+
       if (!imgRes.ok) {
         const errData = await imgRes.json().catch(() => ({}));
         throw new Error(errData.error || `HTTP ${imgRes.status}`);
@@ -775,7 +784,7 @@ const AddBookDialogComponent = forwardRef<
                 <button
                   type="button"
                   onClick={() => downloadAndUploadCover(form.coverUrl)}
-                  disabled={coverLoading || !form.coverUrl}
+                  disabled={coverLoading || (!form.coverUrl && !form.isbn?.trim())}
                   className="rounded-lg border px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50 disabled:cursor-not-allowed w-full"
                 >
                   {coverLoading ? 'Downloading…' : 'Download Cover from OpenLibrary'}
