@@ -1,6 +1,7 @@
 'use client';
 
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useState, useEffect } from "react";
 import { supabase } from "@/lib/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
@@ -446,7 +447,14 @@ function StaffDashboard() {
 }
 
 export default function Dashboard() {
-  const { profile, loading: authLoading } = useAuth();
+  const { user, profile, loading: authLoading } = useAuth();
+  const router = useRouter();
+
+  useEffect(() => {
+    if (!authLoading && !user) {
+      router.replace('/signin');
+    }
+  }, [user, authLoading, router]);
 
   if (authLoading) {
     return (
@@ -457,6 +465,10 @@ export default function Dashboard() {
         <p className="text-sm text-slate-500">Loading...</p>
       </div>
     );
+  }
+
+  if (!user) {
+    return null;
   }
 
   // Route patrons to their dashboard
