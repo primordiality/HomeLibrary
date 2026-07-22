@@ -21,6 +21,7 @@ export default function ManageBooksPage() {
   const [moving, setMoving] = useState(false);
   const [removingSelected, setRemovingSelected] = useState(false);
   const [removingAll, setRemovingAll] = useState(false);
+  const [batchUpdating, setBatchUpdating] = useState<string | null>(null);
 
     // Messages
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
@@ -182,6 +183,28 @@ export default function ManageBooksPage() {
        } finally { setRemovingAll(false); }
       };
 
+       // ─── Batch visibility/toggle helpers ──────────────
+      async function handleBatchUpdate(column: string, value: boolean) {
+    setErrorMessage(null);
+    if (selectedCopyIds.size === 0) return;
+    try {
+       setBatchUpdating(column);
+       const ids = Array.from(selectedCopyIds);
+       const { error } = await supabase
+          .from('book_copies')
+          .update({ [column]: value })
+          .in('id', ids);
+       if (error) throw new Error(error.message);
+       const label = column.replace(/_/g, ' ');
+       setSuccessMessage(`${ids.length} copy(ies) ${label} set to ${value}.`);
+       setSelectedCopyIds(new Set());
+       setTimeout(() => setSuccessMessage(null), 3000);
+       loadAll();
+     } catch (err: unknown) {
+       setErrorMessage((err as Error).message || 'Batch update failed.');
+     } finally { setBatchUpdating(null); }
+     }
+
         // ─── Refresh after adding a new book ──────────────
   function onBookAdded() {
     setShowAddDialog(false);
@@ -207,7 +230,10 @@ export default function ManageBooksPage() {
      // Nothing changed? Skip save.
      if (editData.condition === original.condition && 
           editData.notes === original.notes &&
-          editData.barcode === original.barcode) {
+          editData.barcode === original.barcode &&
+          editData.public === original.public &&
+          editData.holds_enabled === original.holds_enabled &&
+          editData.checkouts_enabled === original.checkouts_enabled) {
       cancelEdit();
       return;
      }
@@ -220,6 +246,12 @@ export default function ManageBooksPage() {
         updates.notes = editData.notes?.trim() || null;
       if (editData.barcode !== original.barcode) 
         updates.barcode = editData.barcode?.trim() || null;
+      if ((!!(editData.public ?? true)) !== (!! (original.public ?? true))) 
+        updates.public = !!editData.public;
+      if ((!!(editData.holds_enabled ?? true)) !== (!! (original.holds_enabled ?? true))) 
+        updates.holds_enabled = !!editData.holds_enabled;
+      if ((!!(editData.checkouts_enabled ?? true)) !== (!! (original.checkouts_enabled ?? true))) 
+        updates.checkouts_enabled = !!editData.checkouts_enabled;
 
        const { error } = await supabase
          .from('book_copies')
@@ -334,7 +366,10 @@ export default function ManageBooksPage() {
 
                              <span className={`px-2 py-0.5 rounded-full text-xs ${book.condition === 'new' ? 'bg-green-100 text-green-800' : book.condition === 'good' ? 'bg-blue-100 text-blue-800' : book.condition === 'fair' ? 'bg-yellow-100 text-yellow-800' : 'bg-red-100 text-red-800'}`}>
                                {book.condition}</span>
-                             <span className="text-xs text-slate-400 hidden sm:inline">{book.barcode ?? '-'}</span>
+                             {!book.public && <span className="px-2 py-0.5 rounded-full text-xs bg-red-100 text-red-800">🔒 Private</span>}
+                             {book.holds_enabled ? <span className="px-2 py-0.5 rounded-full text-xs bg-green-100 text-green-800">Holds: ✓</span> : <span className="px-2 py-0.5 rounded-full text-xs bg-red-100 text-red-800">Holds: ✗</span>}
+                             {book.checkouts_enabled ? <span className="px-2 py-0.5 rounded-full text-xs bg-green-100 text-green-800">Checkouts: ✓</span> : <span className="px-2 py-0.5 rounded-full text-xs bg-red-100 text-red-800">Checkouts: ✗</span>}
+                             {(book.barcode ?? '-') !== '-' && <span className="text-xs text-slate-400 hidden sm:inline">{book.barcode}</span>}
                            </div>
                          </>)}
 
@@ -380,6 +415,34 @@ export default function ManageBooksPage() {
                                      className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm resize-none focus:border-green-500 focus:ring-green-500" />
                                 </div>
 
+                            {/* Visibility & Toggles */}
+                            <div className="space-y-2 mb-3">
+                              <label className="flex items-center gap-2">
+                                <input
+                                  type="checkbox"
+                                  checked={!!(editData.public ?? true)}
+                                  onChange={(e) => setEditData({...editData, public: e.target.checked})}
+                                  className="h-4 w-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500" />
+                                <span className="text-xs text-slate-700">Public — visible in patron catalog</span>
+                              </label>
+                              <label className="flex items-center gap-2">
+                                <input
+                                  type="checkbox"
+                                  checked={!!(editData.holds_enabled ?? true)}
+                                  onChange={(e) => setEditData({...editData, holds_enabled: e.target.checked})}
+                                  className="h-4 w-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500" />
+                                <span className="text-xs text-slate-700">Allow holds</span>
+                              </label>
+                              <label className="flex items-center gap-2">
+                                <input
+                                  type="checkbox"
+                                  checked={!!(editData.checkouts_enabled ?? true)}
+                                  onChange={(e) => setEditData({...editData, checkouts_enabled: e.target.checked})}
+                                  className="h-4 w-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500" />
+                                <span className="text-xs text-slate-700">Allow checkouts</span>
+                              </label>
+                            </div>
+
                             {/* Save / Cancel */}
                               <div className="flex items-center gap-2">
                                 <button onClick={() => handleSaveEdit(book.id)} className="rounded-lg bg-green-600 px-4 py-2 text-sm font-medium text-white hover:bg-green-700 shadow-sm">Save</button>
@@ -405,6 +468,39 @@ export default function ManageBooksPage() {
            <p className="text-sm text-slate-500">Select books above to move or remove them.</p>
           ) : (
             <div className={`rounded-xl border p-4 shadow-sm ${selectedCopyIds.size > 0 && "border-indigo-300 bg-indigo-50"}`}>
+
+                {/* Batch Visibility/Toggle Buttons */}
+               <div className="mb-4">
+                  <p className="text-xs font-medium text-slate-600 mb-2">Visibility &amp; Toggles:</p>
+                  <div className="flex flex-wrap gap-2">
+                    <button onClick={() => handleBatchUpdate('public', true)} disabled={batchUpdating !== null}
+                      className="rounded-lg bg-green-600 px-3 py-1.5 text-xs font-medium text-white shadow-sm hover:bg-green-700 disabled:opacity-50">
+                      Set Public
+                    </button>
+                    <button onClick={() => handleBatchUpdate('public', false)} disabled={batchUpdating !== null}
+                      className="rounded-lg bg-red-600 px-3 py-1.5 text-xs font-medium text-white shadow-sm hover:bg-red-700 disabled:opacity-50">
+                      Set Private
+                    </button>
+                    <button onClick={() => handleBatchUpdate('holds_enabled', true)} disabled={batchUpdating !== null}
+                      className="rounded-lg bg-green-600 px-3 py-1.5 text-xs font-medium text-white shadow-sm hover:bg-green-700 disabled:opacity-50">
+                      Enable Holds
+                    </button>
+                    <button onClick={() => handleBatchUpdate('holds_enabled', false)} disabled={batchUpdating !== null}
+                      className="rounded-lg bg-red-600 px-3 py-1.5 text-xs font-medium text-white shadow-sm hover:bg-red-700 disabled:opacity-50">
+                      Disable Holds
+                    </button>
+                    <button onClick={() => handleBatchUpdate('checkouts_enabled', true)} disabled={batchUpdating !== null}
+                      className="rounded-lg bg-green-600 px-3 py-1.5 text-xs font-medium text-white shadow-sm hover:bg-green-700 disabled:opacity-50">
+                      Enable Checkouts
+                    </button>
+                    <button onClick={() => handleBatchUpdate('checkouts_enabled', false)} disabled={batchUpdating !== null}
+                      className="rounded-lg bg-red-600 px-3 py-1.5 text-xs font-medium text-white shadow-sm hover:bg-red-700 disabled:opacity-50">
+                      Disable Checkouts
+                    </button>
+                  </div>
+               </div>
+
+               <hr className="my-3" />
 
                 {/* Move To dropdown + button */}
                <div className="flex flex-col sm:flex-row gap-2">
