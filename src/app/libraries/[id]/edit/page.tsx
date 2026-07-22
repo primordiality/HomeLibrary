@@ -4,11 +4,15 @@ import { useState, useEffect } from "react";
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase/client";
+import { useAuth } from "@/contexts/AuthContext";
+import type { Profile, Library } from "@/types/db";
 
 export default function EditLibraryPage() {
   const params = useParams<{ id: string }>();
   const router = useRouter();
   const libraryId = params?.id ?? "";
+  const { user } = useAuth();
+  const isSuperAdmin = user?.role === "system_admin";
 
   // Form fields
   const [name, setName] = useState("");
@@ -20,6 +24,11 @@ export default function EditLibraryPage() {
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [settingsSaving, setSettingsSaving] = useState(false);
   const [settingsSaved, setSettingsSaved] = useState(false);
+
+  // Owner assignment (super admin only)
+  const [owners, setOwners] = useState<Profile[]>([]);
+  const [ownerSearch, setOwnerSearch] = useState("");
+  const [ownerDropdownOpen, setOwnerDropdownOpen] = useState(false);
 
   // Archive & delete states
   const [loadingBooks, setLoadingBooks] = useState(true);
@@ -66,11 +75,35 @@ export default function EditLibraryPage() {
         setAllowPublicRegistration(false);
       }
 
+      // Load library owners (if super admin)
+      if (user?.role === "system_admin") {
+        const { data: ownerData } = await supabase
+          .from("profiles")
+          .select("*")
+          .eq("role", "library_owner")
+          .order("name", { ascending: true });
+
+        if (ownerData) setOwners(ownerData as Profile[]);
+
+        // Set current owner if already assigned
+        if (lib.owner_id) {
+          const currentOwner = ownerData?.find((o) => o.id === lib.owner_id);
+          if (currentOwner) {
+            setOwnerSearch(currentOwner.name || "");
+          }
+        }
+      }
+
       setLoadingBooks(false);
     }
 
     loadLibrary();
-  }, [libraryId, router]);
+  }, [libraryId, router, user]);
+
+  const filteredOwners = owners.filter((o) =>
+    (o.name || "").toLowerCase().includes(ownerSearch.toLowerCase()) ||
+    (o.email || "").toLowerCase().includes(ownerSearch.toLowerCase())
+  );
 
   // ─── Save library changes ────────────────
   const handleSave = async () => {
@@ -218,6 +251,73 @@ export default function EditLibraryPage() {
             <input id="phone" type="tel" value={phone} onChange={(e) => setPhone(e.target.value)}
               className="mt-1 block w-full rounded-lg border border-slate-300 px-4 py-2 text-sm focus:border-indigo-500 focus:ring-indigo-500 sm:w-72" />
           </div>
+
+          {isSuperAdmin && (
+            <div>
+              <label htmlFor="owner" className="block text-sm font-medium text-slate-700">Library Owner</label>
+              <div className="relative mt-1">
+                <input
+                  id="owner"
+                  type="text"
+                  placeholder="Search library owners..."
+                  value={ownerSearch}
+                  onChange={(e) => {
+                    setOwnerSearch(e.target.value);
+                    setOwnerDropdownOpen(true);
+                  }}
+                  onFocus={() => setOwnerDropdownOpen(true)}
+                  onClick={(e) => e.stopPropagation()}
+                  className="block w-full rounded-lg border border-slate-300 px-4 py-2 text-sm focus:border-indigo-500 focus:ring-indigo-500 pr-10"
+                />
+                <button
+                  type="button"
+                  onClick={() => setOwnerDropdownOpen(!ownerDropdownOpen)}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
+                >
+                  <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                  </svg>
+                </button>
+                {ownerDropdownOpen && (
+                  <div className="absolute z-50 mt-1 w-full bg-white border border-slate-200 rounded-lg shadow-lg max-h-60 overflow-y-auto">
+                    {filteredOwners.length === 0 ? (
+                      <div className="px-4 py-3 text-sm text-slate-400">No library owners found</div>
+                    ) : (
+                      filteredOwners.map((o) => (
+                        <button
+                          key={o.id}
+                          type="button"
+                          onClick={() => {
+                            setOwnerSearch(o.name || "");
+                            setOwnerDropdownOpen(false);
+                            // Save immediately
+                            supabase
+                              .from("libraries")
+                              .update({ owner_id: o.id })
+                              .eq("id", libraryId)
+                              .then(({ error }) => {
+                                if (!error) {
+                                  // Success — no toast needed, just update
+                                } else {
+                                  setErrorMessage(`Failed to assign owner: ${error.message}`);
+                                }
+                              });
+                          }}
+                          className="w-full text-left px-4 py-2 text-sm hover:bg-slate-50 transition"
+                        >
+                          <div className="font-medium text-slate-900">{o.name || "—"}</div>
+                          <div className="text-xs text-slate-500">{o.email || "—"}</div>
+                        </button>
+                      ))
+                    )}
+                  </div>
+                )}
+              </div>
+              <p className="mt-1 text-xs text-slate-500">
+                Only visible and editable by system admins
+              </p>
+            </div>
+          )}
 
           <button type="submit" disabled={saving}
             className="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-indigo-700 disabled:opacity-50">

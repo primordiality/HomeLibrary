@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { supabase } from "@/lib/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
-import type { Profile } from "@/types/db";
+import type { Profile, Library } from "@/types/db";
 
 type AdminUserRow = Profile;
 
@@ -14,6 +14,10 @@ export default function AdminUsers() {
   const [showRoleModal, setShowRoleModal] = useState(false);
   const [roleModalUser, setRoleModalUser] = useState<{ id: string; name: string } | null>(null);
   const [newRole, setNewRole] = useState<Profile["role"]>("patron");
+  const [selectedLibraryId, setSelectedLibraryId] = useState<string | null>(null);
+  const [libraries, setLibraries] = useState<Library[]>([]);
+  const [librarySearch, setLibrarySearch] = useState("");
+  const [libraryDropdownOpen, setLibraryDropdownOpen] = useState(false);
   const [modalName, setModalName] = useState("");
   const [modalEmail, setModalEmail] = useState("");
   const [modalPassword, setModalPassword] = useState("");
@@ -49,6 +53,20 @@ export default function AdminUsers() {
   useEffect(() => {
     loadUsers();
   }, [loadUsers]);
+
+  // Load libraries when role modal opens
+  useEffect(() => {
+    if (showRoleModal) {
+      supabase
+        .from("libraries")
+        .select("*")
+        .eq("is_archived", false)
+        .order("name")
+        .then(({ data }) => {
+          if (data) setLibraries(data as Library[]);
+        });
+    }
+  }, [showRoleModal]);
 
   const showToast = (msg: string) => {
     setToast(msg);
@@ -177,6 +195,20 @@ export default function AdminUsers() {
 
     setChangingRole(true);
     try {
+      // If changing to library_owner, also assign the library
+      if (newRole === "library_owner" && selectedLibraryId) {
+        const { error: libErr } = await supabase
+          .from("libraries")
+          .update({ owner_id: roleModalUser.id })
+          .eq("id", selectedLibraryId);
+
+        if (libErr) {
+          setError(`Failed to assign library owner: ${libErr.message}`);
+          setChangingRole(false);
+          return;
+        }
+      }
+
       const { error } = await supabase
         .from("profiles")
         .update({ role: newRole })
@@ -192,6 +224,8 @@ export default function AdminUsers() {
       setShowRoleModal(false);
       setRoleModalUser(null);
       setNewRole("patron");
+      setSelectedLibraryId(null);
+      setLibrarySearch("");
       await loadUsers();
     } catch (e) {
       setError("Failed to update role. Check your connection.");
@@ -199,6 +233,10 @@ export default function AdminUsers() {
       setChangingRole(false);
     }
   };
+
+  const filteredLibraries = libraries.filter(lib =>
+    lib.name.toLowerCase().includes(librarySearch.toLowerCase())
+  );
 
   return (
     <div className="space-y-6">
@@ -442,7 +480,14 @@ export default function AdminUsers() {
               <label className="block text-sm font-medium text-slate-700 mb-1">New Role</label>
               <select
                 value={newRole}
-                onChange={(e) => setNewRole(e.target.value as Profile["role"])}
+                onChange={(e) => {
+                  setNewRole(e.target.value as Profile["role"]);
+                  if (e.target.value !== "library_owner") {
+                    setSelectedLibraryId(null);
+                    setLibrarySearch("");
+                    setLibraryDropdownOpen(false);
+                  }
+                }}
                 className="block w-full px-3 py-2 border border-slate-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
               >
                 <option value="patron">Patron</option>
@@ -451,6 +496,66 @@ export default function AdminUsers() {
                 <option value="system_admin">System Admin</option>
               </select>
             </div>
+
+            {newRole === "library_owner" && (
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1">
+                  Assign Library
+                </label>
+                <div className="relative">
+                  <input
+                    type="text"
+                    placeholder="Search libraries..."
+                    value={librarySearch}
+                    onChange={(e) => {
+                      setLibrarySearch(e.target.value);
+                      setLibraryDropdownOpen(true);
+                    }}
+                    onFocus={() => setLibraryDropdownOpen(true)}
+                    onClick={(e) => e.stopPropagation()}
+                    className="block w-full px-3 py-2 border border-slate-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 pr-10"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setLibraryDropdownOpen(!libraryDropdownOpen)}
+                    className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
+                  >
+                    <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                    </svg>
+                  </button>
+                  {libraryDropdownOpen && (
+                    <div className="absolute z-50 mt-1 w-full bg-white border border-slate-200 rounded-lg shadow-lg max-h-60 overflow-y-auto">
+                      {filteredLibraries.length === 0 ? (
+                        <div className="px-3 py-2 text-sm text-slate-400">No libraries found</div>
+                      ) : (
+                        filteredLibraries.map((lib) => (
+                          <button
+                            key={lib.id}
+                            type="button"
+                            onClick={() => {
+                              setSelectedLibraryId(lib.id);
+                              setLibrarySearch(lib.name);
+                              setLibraryDropdownOpen(false);
+                            }}
+                            className={`w-full text-left px-3 py-2 text-sm hover:bg-slate-50 transition ${
+                              selectedLibraryId === lib.id ? "bg-blue-50 text-blue-700 font-medium" : ""
+                            }`}
+                          >
+                            {lib.name}
+                          </button>
+                        ))
+                      )}
+                    </div>
+                  )}
+                </div>
+                {selectedLibraryId && (
+                  <p className="mt-1 text-xs text-slate-500">
+                    Selected: {libraries.find((l) => l.id === selectedLibraryId)?.name}
+                  </p>
+                )}
+              </div>
+            )}
 
             {error && (
               <div className="p-2 text-sm text-red-700 bg-red-50 rounded-lg">
