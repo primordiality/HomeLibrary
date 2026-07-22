@@ -41,7 +41,7 @@ function CatalogContent() {
 
   // Refresh catalog when library, visibility, or search changes
   useEffect(() => {
-    loadCatalog(activeLibId, searchQuery);
+    loadCatalog(activeLibId, searchQuery, visibilityFilter);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeLibId, searchQuery, visibilityFilter]);
 
@@ -218,7 +218,7 @@ function CatalogContent() {
 
   function onBookAdded() {
     setShowDialog(false);
-    loadCatalog(activeLibId, searchQuery);
+    loadCatalog(activeLibId, searchQuery, visibilityFilter);
   }
 
   const selectedLibrary = libraries.find((l: any) => l.id === activeLibId);
@@ -466,7 +466,7 @@ function CatalogContent() {
         {/* Add Book Dialog Modal */}
         <AddBookDialog
           isOpen={showDialog}
-          onClose={() => { setShowDialog(false); loadCatalog(activeLibId, searchQuery); }}
+          onClose={() => { setShowDialog(false); loadCatalog(activeLibId, searchQuery, visibilityFilter); }}
         />
       </div>
   );
