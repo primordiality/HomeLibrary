@@ -33,6 +33,7 @@ function BorrowingsContent() {
   const [checkoutSuccess, setCheckoutSuccess] = useState<string | null>(null);
   const [currentUser, setCurrentUser] = useState<any>(null);
   const [currentUserPatronId, setCurrentUserPatronId] = useState('');
+  const [currentUserIsPatron, setCurrentUserIsPatron] = useState(false);
 
   // Book settings for checkout modal
   const [bookSettings, setBookSettings] = useState<BookSettings | null>(null);
@@ -65,6 +66,7 @@ function BorrowingsContent() {
           setCurrentUserPatronId(user.id);
           setCheckoutPatron(user.id);
         }
+        setCurrentUserIsPatron(profile?.role === 'patron');
       }
     }
     if (showCheckoutModal) loadCurrentUser();
@@ -822,7 +824,7 @@ function BorrowingsContent() {
                  <div className="space-y-4">
                    <div>
                      <label className="block text-sm font-medium text-slate-700 mb-1">Patron</label>
-                     {currentUserPatronId ? (
+                     {currentUserIsPatron && currentUserPatronId ? (
                        <div className="w-full rounded-lg border border-indigo-200 bg-indigo-50 px-3 py-2 text-sm text-slate-700">
                          {patronMap[currentUserPatronId] || currentUser?.email || 'Unknown'}
                        </div>
