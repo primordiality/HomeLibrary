@@ -93,6 +93,9 @@ const AddBookDialogComponent = forwardRef<
     isbn: '', title: '', subtitle: '', authors: '',
     publisher: '', publishDate: '', pages: '', coverUrl: '',
   });
+  const [coverImageData, setCoverImageData] = useState<{ bytes: number[]; contentType: string } | null>(null);
+  const [coverLoading, setCoverLoading] = useState(false);
+  const [coverStatus, setCoverStatus] = useState<string | null>(null);
 
   // available libraries for admin dropdown
   const [libraries, setLibraries] = useState<any[]>([]);
@@ -109,6 +112,9 @@ const AddBookDialogComponent = forwardRef<
       setLoading(false);
       setStep('search');
       setForm(formDefault());
+      setCoverImageData(null);
+      setCoverLoading(false);
+      setCoverStatus(null);
     },
   }));
 
@@ -330,6 +336,28 @@ const AddBookDialogComponent = forwardRef<
 
     try {
       // Build book metadata (title always required; isbn only when present)
+      let coverUrl = form.coverUrl?.trim() || null;
+
+      // If we have downloaded cover bytes, upload to Storage first
+      if (coverImageData) {
+        const extension = coverImageData.contentType?.split('/')[1] || 'jpg';
+        const tempId = hasISBN && cleaned.length > 0 ? cleaned : `temp-${Date.now()}`;
+        const fileName = `book-covers/${tempId}-${Date.now()}.${extension}`;
+        const blob = new Blob([new Uint8Array(coverImageData.bytes)], { type: coverImageData.contentType });
+        const { error: uploadErr } = await supabase.storage
+          .from('library-images')
+          .upload(fileName, blob, { upsert: true });
+        if (uploadErr) {
+          console.error('Cover upload failed:', uploadErr);
+          // Non-fatal: fall back to remote URL
+        } else {
+          const { data: urlData } = supabase.storage
+            .from('library-images')
+            .getPublicUrl(fileName);
+          coverUrl = urlData?.publicUrl || coverUrl;
+        }
+      }
+
       const bookData: Record<string, unknown> = {
         title: form.title.trim(),
         subtitle: form.subtitle?.trim() || null,
@@ -339,7 +367,7 @@ const AddBookDialogComponent = forwardRef<
         publisher: form.publisher?.trim() || null,
         publish_date: form.publishDate?.trim() || null,
         pages: parseInt(form.pages, 10) || null,
-        cover_url: form.coverUrl?.trim() || null,
+        cover_url: coverUrl,
       };
       if (hasISBN) {
         (bookData as Record<string, unknown>).isbn = cleaned;
@@ -358,6 +386,10 @@ const AddBookDialogComponent = forwardRef<
         if (existing?.id) {
           // Book exists — create a new copy pointing to the existing book
           bookId = existing.id;
+          // Also update existing book's cover if we have new bytes
+          if (coverUrl) {
+            await supabase.from('books').update({ cover_url: coverUrl }).eq('id', bookId);
+          }
         } else {
           // No existing book — create new master record
           const { data: newBook, error: insertErr } = await supabase
@@ -424,6 +456,9 @@ const AddBookDialogComponent = forwardRef<
     setManualAuthor('');
     setWorks([]);
     setFormError(null);
+    setCoverStatus(null);
+    setCoverImageData(null);
+    setCoverLoading(false);
     setLoading(false);
     if (m === 'isbn') setStep('search');
     else                setStep('search'); // same step, different inputs
@@ -435,10 +470,48 @@ const AddBookDialogComponent = forwardRef<
     setManualAuthor('');
     setWorks([]);
     setFormError(null);
+    setCoverStatus(null);
+    setCoverImageData(null);
+    setCoverLoading(false);
     setLoading(false);
     setStep('search');
     setForm(formDefault());
     onClose();
+  }
+
+  /* ═══════─ cover image download & upload ────── */
+
+  async function downloadAndUploadCover(coverUrlStr: string): Promise<void> {
+    if (!coverUrlStr) {
+      setCoverStatus('No cover URL available');
+      return;
+    }
+    setCoverLoading(true);
+    setCoverStatus('Downloading cover…');
+    try {
+      const imgRes = await fetch('/api/fetch-cover', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ url: coverUrlStr }),
+      });
+      if (!imgRes.ok) {
+        const errData = await imgRes.json().catch(() => ({}));
+        throw new Error(errData.error || `HTTP ${imgRes.status}`);
+      }
+      const imgData = await imgRes.json();
+      if (!imgData.bytes || !imgData.bytes.length) {
+        throw new Error('No image data received');
+      }
+      // Store the raw bytes for upload on save
+      setCoverImageData({ bytes: imgData.bytes, contentType: imgData.contentType });
+      setCoverStatus('Cover downloaded — will save to storage when you add the book');
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : 'Unknown error';
+      console.error('Cover download failed:', msg);
+      setCoverStatus('Cover download failed: ' + msg);
+    } finally {
+      setCoverLoading(false);
+    }
   }
 
   /* ═══════─ field renderer ────────────── */
@@ -673,9 +746,49 @@ const AddBookDialogComponent = forwardRef<
 
         {/* Editable book metadata form */}
         <div className="space-y-3">
-          <h3 className="text-sm font-semibold text-slate-900">
-            Book Details (editable)
-          </h3>
+          {/* Cover image section */}
+          <div>
+            <label className="block text-sm font-medium text-slate-700 mb-1">Cover Image</label>
+            <div className="flex items-start gap-3">
+              <div className="w-16 h-24 bg-slate-100 rounded border flex items-center justify-center overflow-hidden shrink-0">
+                {coverImageData ? (
+                  <img
+                    src={`data:${coverImageData.contentType};base64,${btoa(String.fromCharCode(...coverImageData.bytes))}`}
+                    alt="Cover preview"
+                    className="w-full h-full object-cover"
+                  />
+                ) : form.coverUrl ? (
+                  <img
+                    src={form.coverUrl}
+                    alt="Cover preview"
+                    className="w-full h-full object-cover"
+                    onError={(e) => {
+                      (e.target as HTMLImageElement).style.display = 'none';
+                      (e.target as HTMLImageElement).parentElement!.textContent = '📖';
+                    }}
+                  />
+                ) : (
+                  <span className="text-2xl">📖</span>
+                )}
+              </div>
+              <div className="flex-1 space-y-1">
+                <button
+                  type="button"
+                  onClick={() => downloadAndUploadCover(form.coverUrl)}
+                  disabled={coverLoading || !form.coverUrl}
+                  className="rounded-lg border px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50 disabled:cursor-not-allowed w-full"
+                >
+                  {coverLoading ? 'Downloading…' : 'Download Cover from OpenLibrary'}
+                </button>
+                {coverStatus && (
+                  <p className={`text-xs ${coverStatus.includes('failed') ? 'text-red-600' : coverStatus.includes('Downloaded') ? 'text-green-600' : 'text-slate-500'}`}>
+                    {coverStatus}
+                  </p>
+                )}
+              </div>
+            </div>
+          </div>
+
           {renderField('ISBN', form.isbn, 'isbn')}
           {renderField('Title', form.title, 'title', true)}
           {renderField('Subtitle', form.subtitle, 'subtitle')}

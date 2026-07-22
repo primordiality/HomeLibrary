@@ -115,10 +115,54 @@ export default function EditBookPage() {
     setFetchingCover(true);
     try {
       const res = await fetchBookByIsbn(isbn);
-      if (res?.coverUrl) { setCoverUrl(res.coverUrl); setOkMsg('Cover loaded'); }
-      else setErrorStr('No cover found');
-    } catch (e: any) { setErrorStr(e.message || 'Failed'); }
-    finally { setFetchingCover(false); }
+      if (res?.coverUrl) {
+        // Download the image via our API route to bypass CORS, then upload to Storage
+        const imgRes = await fetch('/api/fetch-cover', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ url: res.coverUrl, bookId }),
+        });
+        if (imgRes.ok) {
+          const imgData = await imgRes.json();
+          if (imgData.bytes) {
+            // Upload to Supabase Storage
+            const extension = imgData.contentType?.split('/')[1] || 'jpg';
+            const fileName = `book-covers/${bookId}-${Date.now()}.${extension}`;
+            const blob = new Blob([new Uint8Array(imgData.bytes)], { type: imgData.contentType });
+            const { error: uploadErr } = await supabase.storage
+              .from('library-images')
+              .upload(fileName, blob, { upsert: true });
+            if (uploadErr) {
+              console.error('Storage upload failed:', uploadErr);
+              setErrorStr('Cover downloaded but storage upload failed: ' + uploadErr.message);
+              setCoverUrl(res.coverUrl); // fallback to remote URL
+              setOkMsg('Cover loaded (remote link — storage upload failed)');
+            } else {
+              // Get public URL
+              const { data: urlData } = supabase.storage
+                .from('library-images')
+                .getPublicUrl(fileName);
+              setCoverUrl(urlData?.publicUrl || res.coverUrl);
+              setOkMsg('Cover downloaded and saved to storage');
+            }
+          } else {
+            setCoverUrl(res.coverUrl);
+            setOkMsg('Cover loaded (remote link)');
+          }
+        } else {
+          // Fallback: just use the URL
+          setCoverUrl(res.coverUrl);
+          setOkMsg('Cover loaded (remote link)');
+        }
+      } else {
+        setErrorStr('No cover found');
+      }
+    } catch (e: any) {
+      console.error('Failed to fetch cover:', e);
+      setErrorStr(e.message || 'Failed');
+    } finally {
+      setFetchingCover(false);
+    }
   }
 
   async function handleSave() {
@@ -138,12 +182,19 @@ export default function EditBookPage() {
     setErrorStr(null);
     setOkMsg(null);
     try {
-      const { error } = await supabase.from('books').update(sdata as Record<string, any>).eq('id', bookId);
+      const { data, error } = await supabase.from('books').update(sdata as Record<string, any>).eq('id', bookId);
       if (error) throw new Error(error.message || 'Failed to save book');
+      if (!data || (Array.isArray(data) && (data as any[]).length === 0)) {
+        throw new Error('Update affected 0 rows. This may be an RLS permission issue. Check browser console for details.');
+      }
       setOkMsg('Book saved!');
       router.refresh();
-    } catch (e: any) { setErrorStr(e.message || 'Save failed'); }
-    finally { setSaving(false); }
+    } catch (e: any) {
+      console.error('[handleSave] save error:', e);
+      setErrorStr(e.message || 'Save failed');
+    } finally {
+      setSaving(false);
+    }
   }
 
   async function handleDelete() {
