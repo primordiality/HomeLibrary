@@ -30,6 +30,7 @@ async function fetchBookByIsbn(isbnRaw: string): Promise<{
     const data: any = await ok(res);
     if (data?.docs?.length > 0) {
       const b = data.docs[0];
+      const coverUrl = resolveCoverUrl(b.cover_edition_id, b.cover_i);
       return {
         title: b.title,
         subtitle: undefined,
@@ -37,7 +38,7 @@ async function fetchBookByIsbn(isbnRaw: string): Promise<{
         publisher: b.publisher_name?.[0],
         publishDate: b.first_publish_year ? `${b.first_publish_year}` : undefined,
         pages: b.number_of_pages,
-        coverUrl: b.cover_edition_id ? `https://covers.openlibrary.org/b/id/${b.cover_edition_id}-M.jpg` : undefined,
+        coverUrl,
       };
     }
   } catch { /* fall through to strategy B */ }
@@ -48,6 +49,7 @@ async function fetchBookByIsbn(isbnRaw: string): Promise<{
     const data: any = await ok(res);
     if (data?.docs?.length > 0) {
       const b = data.docs[0];
+      const coverUrl = resolveCoverUrl(b.cover_edition_id, b.cover_i);
       return {
         title: b.title,
         subtitle: undefined,
@@ -55,7 +57,7 @@ async function fetchBookByIsbn(isbnRaw: string): Promise<{
         publisher: b.publisher_name?.[0],
         publishDate: b.first_publish_year ? `${b.first_publish_year}` : undefined,
         pages: b.number_of_pages,
-        coverUrl: b.cover_edition_id ? `https://covers.openlibrary.org/b/id/${b.cover_edition_id}-M.jpg` : undefined,
+        coverUrl,
       };
     }
   } catch { /* fall through to strategy C */ }
@@ -65,6 +67,7 @@ async function fetchBookByIsbn(isbnRaw: string): Promise<{
     const res = await fetch(`${BASE}/isbn/${cleaned}.json`);
     const data: any = await ok(res);
     if (data && data.title) {
+      const coverUrl = resolveCoverUrl(data.cover_edition_id, data.cover_i);
       return {
         title: data.title,
         subtitle: undefined, // edition-level usually doesn't have separate field
@@ -72,12 +75,32 @@ async function fetchBookByIsbn(isbnRaw: string): Promise<{
         publisher: data.publishers?.[0],
         publishDate: data.first_publish_date,
         pages: data.number_of_pages,
-        coverUrl: data.cover_edition_id ? `https://covers.openlibrary.org/b/id/${data.cover_edition_id}-M.jpg` : undefined,
+        coverUrl,
       };
     }
   } catch { /* fall through */ }
 
   return null; // no results from any source
+}
+
+// ── Cover URL resolution ──────────────────────────
+/**
+ * OpenLibrary returns covers via two different fields:
+ *   - cover_edition_id: used in /b/id/{id}-M.jpg (larger covers)
+ *   - cover_i: used in /c/id/{id}-M.jpg (compact covers)
+ *
+ * Both are integers (note the '_i' suffix). Prefer cover_edition_id when
+ * available since it points to a full edition with the cover. Otherwise
+ * fall back to cover_i.
+ */
+function resolveCoverUrl(editionId: number | string | undefined, coverInt: number | undefined): string | undefined {
+  if (editionId !== undefined && editionId !== null && editionId !== '') {
+    return `https://covers.openlibrary.org/b/id/${editionId}-M.jpg`;
+  }
+  if (coverInt !== undefined && coverInt !== null) {
+    return `https://covers.openlibrary.org/c/id/${coverInt}-M.jpg`;
+  }
+  return undefined;
 }
 
 // ── ISBN search / browse (generic) ────────────────
