@@ -4,7 +4,6 @@ const nextConfig = {
   images: {
     remotePatterns: [
       { protocol: 'https', hostname: 'covers.openlibrary.org' },
-      { protocol: 'https', hostname: 'ydfrhhssnholhbuxaaqg.supabase.co' },
     ],
   },
 };
