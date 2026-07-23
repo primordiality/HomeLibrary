@@ -52,6 +52,11 @@ export default function AdminUsers() {
   const [suspendModalUser, setSuspendModalUser] = useState<{ id: string; name: string; status?: Profile["status"] } | null>(null);
   const [suspending, setSuspending] = useState(false);
 
+  // Approve pending users
+  const [showApproveModal, setShowApproveModal] = useState(false);
+  const [approveModalUser, setApproveModalUser] = useState<{ id: string; name: string } | null>(null);
+  const [approving, setApproving] = useState(false);
+
   // Delete
   const [showDeleteModal, setShowDeleteModal] = useState(false);
   const [deleteModalUser, setDeleteModalUser] = useState<{ id: string; name: string; role: string } | null>(null);
@@ -61,6 +66,7 @@ export default function AdminUsers() {
 
   const [showSuspended, setShowSuspended] = useState(true);
   const [showDeleted, setShowDeleted] = useState(false);
+  const [showPending, setShowPending] = useState(true);
 
   const { user } = useAuth();
   const selfId = user?.id;
@@ -404,6 +410,35 @@ export default function AdminUsers() {
     }
   };
 
+  // ── Approve pending user ────────────────────────────────────────
+  const handleApprove = async () => {
+    setError(null);
+    if (!approveModalUser) return;
+
+    setApproving(true);
+    try {
+      const { error } = await supabase
+        .from("profiles")
+        .update({ status: "active" })
+        .eq("id", approveModalUser.id);
+
+      if (error) {
+        setError(`Failed to approve user: ${error.message}`);
+        setApproving(false);
+        return;
+      }
+
+      showToast(`${approveModalUser.name || "User"} approved successfully.`);
+      setShowApproveModal(false);
+      setApproveModalUser(null);
+      await loadUsers();
+    } catch (e) {
+      setError("Failed to approve user. Check your connection.");
+    } finally {
+      setApproving(false);
+    }
+  };
+
   // ── Delete ──────────────────────────────────────────────────────
   const handleDelete = async () => {
     setError(null);
@@ -466,6 +501,7 @@ export default function AdminUsers() {
 
   // Filter users based on toggles
   const filteredUsers = users.filter(u => {
+    if (!showPending && u.status === "pending") return false;
     if (!showSuspended && u.status === "suspended") return false;
     if (!showDeleted && u.deleted_at) return false;
     return true;
@@ -502,6 +538,15 @@ export default function AdminUsers() {
 
       {/* Filter toggles */}
       <div className="flex items-center gap-6">
+        <label className="flex items-center gap-2 cursor-pointer">
+          <input
+            type="checkbox"
+            checked={showPending}
+            onChange={(e) => setShowPending(e.target.checked)}
+            className="h-4 w-4 rounded border-amber-300 text-amber-600 focus:ring-amber-500"
+          />
+          <span className="text-sm text-slate-700">Show pending</span>
+        </label>
         <label className="flex items-center gap-2 cursor-pointer">
           <input
             type="checkbox"
@@ -606,19 +651,34 @@ export default function AdminUsers() {
                       <td className="px-4 py-3 text-right space-x-1">
                         {!isSelf && !isDeleted && (
                           <>
-                            <button
-                              onClick={() => {
-                                setSuspendModalUser({ id: u.id, name: u.name || "", status: u.status });
-                                setShowSuspendModal(true);
-                              }}
-                              className={`text-xs font-medium px-2.5 py-1 rounded border transition ${
-                                u.status === "suspended"
-                                  ? "text-green-700 bg-green-50 hover:bg-green-100 border-green-200"
-                                  : "text-red-700 bg-red-50 hover:bg-red-100 border-red-200"
-                              }`}
-                            >
-                              {u.status === "suspended" ? "Activate" : "Suspend"}
-                            </button>
+                            {/* Approve button for pending users */}
+                            {u.status === "pending" && (
+                              <button
+                                onClick={() => {
+                                  setApproveModalUser({ id: u.id, name: u.name || "" });
+                                  setShowApproveModal(true);
+                                }}
+                                className="text-xs font-medium px-2.5 py-1 rounded border transition text-amber-700 bg-amber-50 hover:bg-amber-100 border-amber-200"
+                              >
+                                Approve
+                              </button>
+                            )}
+                            {/* Suspend/Activate for active/suspended users */}
+                            {u.status !== "pending" && (
+                              <button
+                                onClick={() => {
+                                  setSuspendModalUser({ id: u.id, name: u.name || "", status: u.status });
+                                  setShowSuspendModal(true);
+                                }}
+                                className={`text-xs font-medium px-2.5 py-1 rounded border transition ${
+                                  u.status === "suspended"
+                                    ? "text-green-700 bg-green-50 hover:bg-green-100 border-green-200"
+                                    : "text-red-700 bg-red-50 hover:bg-red-100 border-red-200"
+                                }`}
+                              >
+                                {u.status === "suspended" ? "Activate" : "Suspend"}
+                              </button>
+                            )}
                             <button
                               onClick={() => {
                                 setRoleModalUser({ id: u.id, name: u.name || "" });
@@ -1205,6 +1265,58 @@ export default function AdminUsers() {
                 disabled={suspending}
               >
                 {suspending ? "Processing…" : (suspendModalUser.status === "suspended" ? "Activate" : "Suspend")}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Approve Pending User Modal */}
+      {showApproveModal && approveModalUser && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
+          <div className="w-full max-w-sm bg-white rounded-xl shadow-xl p-6 space-y-4">
+            <div className="flex items-center justify-between">
+              <h2 className="text-lg font-semibold text-slate-900">Approve User</h2>
+              <button
+                onClick={() => {
+                  setShowApproveModal(false);
+                  setApproveModalUser(null);
+                }}
+                className="text-slate-400 hover:text-slate-600"
+              >
+                <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+
+            <p className="text-sm text-slate-600">
+              Approve user <span className="font-medium text-slate-900">{approveModalUser.name}</span>? They will be able to log in and access the system.
+            </p>
+
+            {error && (
+              <div className="p-2 text-sm text-red-700 bg-red-50 rounded-lg">
+                {error}
+              </div>
+            )}
+
+            <div className="flex gap-3 pt-2">
+              <button
+                onClick={() => {
+                  setShowApproveModal(false);
+                  setApproveModalUser(null);
+                }}
+                className="flex-1 px-4 py-2 text-sm font-medium text-slate-700 bg-white border border-slate-300 rounded-lg hover:bg-slate-50 transition"
+                disabled={approving}
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleApprove}
+                className="flex-1 px-4 py-2 text-sm font-medium text-white bg-amber-600 rounded-lg hover:bg-amber-700 transition disabled:opacity-50"
+                disabled={approving}
+              >
+                {approving ? "Approving…" : "Approve User"}
               </button>
             </div>
           </div>
