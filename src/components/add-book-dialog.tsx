@@ -888,7 +888,7 @@ const AddBookDialogComponent = forwardRef<
                   onClick={() => handleModeSwitch('isbn')}
                   className={`text-sm py-1.5 px-3 rounded-lg border font-medium transition-colors flex-1 ${mode === 'isbn' ? 'bg-indigo-600 text-white ring-2 ring-indigo-200' : 'hover:bg-slate-50'}`}
                 >
-                  ISBN Lookup
+                  OpenLibrary Lookup
                 </button>
                 <button
                   onClick={() => handleModeSwitch('manual')}
