@@ -714,6 +714,7 @@ function StaffDashboard() {
           const { data: profiles } = await supabase
             .from('profiles')
             .select('id, name, email')
+            .is('deleted_at', null)
             .in('id', patronIds);
 
           if (profiles) {

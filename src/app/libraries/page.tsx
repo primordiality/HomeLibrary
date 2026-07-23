@@ -72,6 +72,7 @@ export default function LibrariesPage() {
                                  .from('profiles')
                                  .select('name')
                                  .eq('id', lib.owner_id)
+                                 .is('deleted_at', null)
                                  .maybeSingle()
                             if (owner?.name) {
                                 ownersMap.set(String(lib.id), owner.name)

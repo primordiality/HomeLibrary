@@ -130,7 +130,7 @@ function BorrowingsContent() {
 
   async function loadPatrons() {
     try {
-      const { data: p } = await supabase.from('profiles').select('*');
+      const { data: p } = await supabase.from('profiles').select('*').is('deleted_at', null);
       if (p) {
         const map: Record<string, string> = {};
         for (const item of p) {

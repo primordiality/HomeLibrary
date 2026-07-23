@@ -99,6 +99,7 @@ export default function EditLibraryPage() {
           .from("profiles")
           .select("*")
           .eq("role", "library_owner")
+          .is("deleted_at", null)
           .order("name", { ascending: true });
 
         if (ownerData) setOwners(ownerData as Profile[]);

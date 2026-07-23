@@ -1,9 +1,11 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect, Suspense } from "react";
+import { useSearchParams, useRouter } from "next/navigation";
 import { useAuth } from "@/contexts/AuthContext";
 
-export default function SignIn() {
+function SignInContent() {
+  const searchParams = useSearchParams();
   const { signIn, signUp } = useAuth();
   const [mode, setMode] = useState<"login" | "signup">("login");
   const [email, setEmail] = useState("");
@@ -11,6 +13,16 @@ export default function SignIn() {
   const [name, setName] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+
+  // Display auth error from URL params (suspended/deleted accounts)
+  useEffect(() => {
+    const errorParam = searchParams.get("error");
+    if (errorParam === "suspended") {
+      setError("Your account has been suspended. Contact support.");
+    } else if (errorParam === "deleted") {
+      setError("Your account has been deleted. Contact support.");
+    }
+  }, [searchParams]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -158,5 +170,13 @@ export default function SignIn() {
         </div>
       </div>
     </div>
+  );
+}
+
+export default function SignIn() {
+  return (
+    <Suspense>
+      <SignInContent />
+    </Suspense>
   );
 }

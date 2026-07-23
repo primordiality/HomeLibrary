@@ -30,6 +30,7 @@ export default function AdminSettings() {
       const { data: allUsers, error: usersErr } = await supabase
         .from("profiles")
         .select("id, name, email, role, created_at")
+        .is("deleted_at", null)
         .order("created_at", { ascending: true });
 
       // Load all libraries

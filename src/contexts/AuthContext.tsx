@@ -70,7 +70,18 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         console.error('Failed to load profile:', error.message);
         setProfile(null);
       } else {
-        setProfile(data as Profile);
+        const profileData = data as Profile;
+        if (profileData.status === 'suspended') {
+          await supabase.auth.signOut();
+          window.location.href = '/signin?error=suspended';
+          return;
+        }
+        if (profileData.status === 'deleted') {
+          await supabase.auth.signOut();
+          window.location.href = '/signin?error=deleted';
+          return;
+        }
+        setProfile(profileData);
       }
     } catch (e) {
       console.error('Profile fetch failed:', e);

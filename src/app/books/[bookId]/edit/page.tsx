@@ -76,12 +76,12 @@ export default function EditBookPage() {
       const ptMap: Record<string, string> = {};
       if (brs) for (const b of brs as any[]) { if (b.patron_user_id && !(b.patron_user_id in ptMap)) ptMap[b.patron_user_id] = ''; }
       const ptnArr = Object.keys(ptMap);
-      if (ptnArr.length > 0) { const { data: ps }: any = await supabase.from('profiles').select('*').in('id', ptnArr); if (ps) for (const p of ps) ptMap[p.id] = p.name || 'Unnamed'; }
+      if (ptnArr.length > 0) { const { data: ps }: any = await supabase.from('profiles').select('*').in('id', ptnArr).is('deleted_at', null); if (ps) for (const p of ps) ptMap[p.id] = p.name || 'Unnamed'; }
       ids.forEach((cid: string, i: number) => { const c2 = copRes![i]; if (!c2) return; const blist = (brs as any[] || []).filter((b: any) => b.copy_id === cid).map((b: any) => ({ ...b, patron_name: ptMap[b.patron_user_id] || null })); Object.assign(c2, { location_name: locMap[c2.location_id || ''] || '', copy_borrows: blist }); });
     }
 
     let pats: any[] = [];
-    try { const { data }: any = await supabase.from('profiles').select('*').order('name'); if (data) pats = data; } catch {}
+    try { const { data }: any = await supabase.from('profiles').select('*').is('deleted_at', null).order('name'); if (data) pats = data; } catch {}
 
     setIsbn(book.isbn || '');
     setTitle((book.title as string) || '');

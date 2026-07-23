@@ -40,6 +40,7 @@ export default function PatronsPage() {
         .from('profiles')
         .select('*')
         .eq('role', 'patron')
+        .is('deleted_at', null)
         .order('first_name');
       if (error) throw new Error(error.message);
       if (data) setPatrons(data);

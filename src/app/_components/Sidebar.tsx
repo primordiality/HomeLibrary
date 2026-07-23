@@ -2,7 +2,7 @@
 import Link from 'next/link'
 import { useAuth } from '@/contexts/AuthContext'
 import { usePathname } from 'next/navigation'
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect } from 'react'
 import { supabase } from '@/lib/supabase/client'
 
 interface MenuItem {
@@ -12,31 +12,17 @@ interface MenuItem {
 
 export function Sidebar() {
     const pathname = usePathname()
-    const { user, loading: authLoading, signOut } = useAuth()
-    const [isAdmin, setIsAdmin] = useState(false)
+    const { user, profile, loading: authLoading, signOut } = useAuth()
     const [registrationEnabled, setRegistrationEnabled] = useState(false)
+    const isAdmin = user && profile?.role === 'system_admin'
 
     useEffect(() => {
         let cancelled = false
         ;(async () => {
             try {
                 if (!user) {
-                    setIsAdmin(false)
                     setRegistrationEnabled(false)
                     return
-                }
-
-                // Check if user is system_admin
-                const { data: profile, error: profileErr } = await supabase
-                    .from('profiles')
-                    .select('role')
-                    .eq('id', user.id)
-                    .single()
-
-                if (!profileErr && profile?.role === 'system_admin') {
-                    setIsAdmin(true)
-                } else {
-                    setIsAdmin(false)
                 }
 
                 // Check if any library has public registration enabled
@@ -53,7 +39,6 @@ export function Sidebar() {
                 }
             } catch {
                 if (!cancelled) {
-                    setIsAdmin(false)
                     setRegistrationEnabled(false)
                 }
             }
