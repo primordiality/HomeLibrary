@@ -10,7 +10,7 @@ import type { Profile } from '@/types/db';
 /* ═══════─ types ─────────────────────── */
 
 export type DialogMode = 'isbn' | 'manual';
-export type DialogStep = 'search' | 'review' | 'saved' | 'error';
+export type DialogStep = 'search' | 'save' | 'saved' | 'error';
 
 type OLWork = {
   key: string;
@@ -228,7 +228,7 @@ const AddBookDialogComponent = forwardRef<
       pages: '',
       coverUrl,
     });
-    setStep('review');
+    setStep('save');
   }
 
   async function populateFormFromIsbn(isbnRaw: string): Promise<void> {
@@ -246,13 +246,13 @@ const AddBookDialogComponent = forwardRef<
         pages: metadata.pages ? String(metadata.pages) : '',
         coverUrl: metadata.coverUrl || '',
       });
-      setStep('review');
+      setStep('save');
     } else {
       // No OL match → leave form editable with ISBN prefilled
       setForm({
         ...formDefault(), isbn: cleaned,
       });
-      setStep('review');
+      setStep('save');
     }
   }
 
@@ -277,7 +277,7 @@ const AddBookDialogComponent = forwardRef<
       setFormError(
         'Search failed — please fill in the details manually.'
       );
-      setStep('review');
+      setStep('save');
     } finally {
       setLoading(false);
     }
@@ -323,7 +323,7 @@ const AddBookDialogComponent = forwardRef<
     // Title is required at minimum
     if (!form.title?.trim()) {
       setFormError('A book title is required.');
-      setStep('review');
+      setStep('save');
       setLoading(false);
       return;
     }
@@ -335,7 +335,7 @@ const AddBookDialogComponent = forwardRef<
 
     if (!libraryId) {
       setFormError('Please select a library for this book, or contact an admin to assign you a library.');
-      setStep('review');
+      setStep('save');
       setLoading(false);
       return;
     }
@@ -454,7 +454,7 @@ const AddBookDialogComponent = forwardRef<
         detail = (err as Record<string, unknown>).error_description as string;
       }
       setFormError(detail);
-      setStep('review');
+      setStep('save');
     } finally {
       setLoading(false);
     }
@@ -571,12 +571,15 @@ const AddBookDialogComponent = forwardRef<
 
   function renderSearchStep(): React.ReactElement {
     if (mode === 'isbn') {
-      // ISBN lookup mode
+      // ISBN lookup mode: ISBN + title/author OL search + work results
       return (
         <div className="space-y-4">
           <p className="text-sm text-slate-500">
-            Enter an ISBN and we'll look up the book details automatically.
+            Enter an ISBN to look up book details automatically, or search by
+            title/author.
           </p>
+
+          {/* ISBN search */}
           <div>
             <label
               htmlFor="field-isbn-search"
@@ -596,102 +599,110 @@ const AddBookDialogComponent = forwardRef<
           <button
             onClick={handleISBNSearch}
             disabled={loading || !query.trim()}
-            className="w-full rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700 disabled:opacity-50"
+            className="w-full rounded-lg bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-700 disabled:opacity-50"
           >
             {loading ? 'Searching...' : 'Search OpenLibrary'}
           </button>
+
+          <hr className="border-slate-200" />
+
+          {/* Optional: search by title/author */}
+          <p className="text-xs text-slate-400 text-center">— or search by title —</p>
+
+          <div className="space-y-2">
+            <label
+              htmlFor="field-manual-title"
+              className="block text-sm font-medium text-slate-700"
+            >
+              Book Title (for OL search)
+            </label>
+            <input
+              id="field-manual-title"
+              type="text"
+              value={manualTitle}
+              placeholder="e.g. The Great Gatsby"
+              onChange={(e) => setManualTitle(e.target.value)}
+              className="w-full rounded-lg border border-slate-300 px-4 py-2 text-sm focus:border-indigo-500 focus:ring-indigo-500"
+            />
+          </div>
+          <div className="space-y-2">
+            <label
+              htmlFor="field-manual-author"
+              className="block text-sm font-medium text-slate-700"
+            >
+              Author (optional)
+            </label>
+            <input
+              id="field-manual-author"
+              type="text"
+              value={manualAuthor}
+              placeholder="e.g. F. Scott Fitzgerald"
+              onChange={(e) => setManualAuthor(e.target.value)}
+              className="w-full rounded-lg border border-slate-300 px-4 py-2 text-sm focus:border-indigo-500 focus:ring-indigo-500"
+            />
+          </div>
+          <button
+            onClick={handleManualSearch}
+            disabled={loading || !manualTitle.trim()}
+            className="w-full rounded-lg bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-700 disabled:opacity-50"
+          >
+            {loading ? 'Searching...' : 'Search OpenLibrary'}
+          </button>
+
+          {/* Show fetched work results */}
+          {works.length > 0 && (
+            <div className="space-y-2">
+              <h4 className="text-sm font-medium text-slate-700">
+                Select a matching book:
+              </h4>
+              <ul className="max-h-56 overflow-y-auto space-y-1">
+                {works.map((w) => (
+                  <li key={w.key}>
+                    <button
+                      type="button"
+                      onClick={() => handleWorkSelect(w)}
+                      disabled={loading}
+                      className="w-full text-left rounded-md border p-3 hover:bg-slate-50 transition-colors"
+                    >
+                      <div className="text-sm font-medium text-slate-900">
+                        {w.title}
+                      </div>
+                      {w.authors?.length && (
+                        <div className="text-xs text-slate-500">
+                          by {w.authors.join(', ')}
+                        </div>
+                      )}
+                      {w.first_publish_year && (
+                        <div className="text-xs text-slate-400">
+                          {w.first_publish_year}
+                        </div>
+                      )}
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+
+          {/* Error in search step */}
+          {formError && (
+            <div className="p-3 bg-red-50 text-sm text-red-700 rounded-lg">
+              {formError}
+            </div>
+          )}
         </div>
       );
     }
 
-    // Manual entry mode
+    // Manual entry mode: just fields + Save
     return (
       <div className="space-y-4">
         <p className="text-sm text-slate-500">
-          Enter the book title (and optionally author), or add details manually.
+          Enter the book details below and save directly.
         </p>
 
-        {/* Optional: search by title/author */}
+        {/* Manual fields */}
         <div className="space-y-2">
-          <label
-            htmlFor="field-manual-title"
-            className="block text-sm font-medium text-slate-700"
-          >
-            Book Title (for OL search)
-          </label>
-          <input
-            id="field-manual-title"
-            type="text"
-            value={manualTitle}
-            placeholder="e.g. The Great Gatsby"
-            onChange={(e) => setManualTitle(e.target.value)}
-            className="w-full rounded-lg border border-slate-300 px-4 py-2 text-sm focus:border-indigo-500 focus:ring-indigo-500"
-          />
-        </div>
-        <div className="space-y-2">
-          <label
-            htmlFor="field-manual-author"
-            className="block text-sm font-medium text-slate-700"
-          >
-            Author (optional)
-          </label>
-          <input
-            id="field-manual-author"
-            type="text"
-            value={manualAuthor}
-            placeholder="e.g. F. Scott Fitzgerald"
-            onChange={(e) => setManualAuthor(e.target.value)}
-            className="w-full rounded-lg border border-slate-300 px-4 py-2 text-sm focus:border-indigo-500 focus:ring-indigo-500"
-          />
-        </div>
-        <button
-          onClick={handleManualSearch}
-          disabled={loading || !manualTitle.trim()}
-          className="w-full rounded-lg bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-700 disabled:opacity-50"
-        >
-          {loading ? 'Searching...' : 'Search OpenLibrary'}
-        </button>
-
-        {/* Show fetched work results */}
-        {works.length > 0 && (
-          <div className="space-y-2">
-            <h4 className="text-sm font-medium text-slate-700">
-              Select a matching book:
-            </h4>
-            <ul className="max-h-56 overflow-y-auto space-y-1">
-              {works.map((w) => (
-                <li key={w.key}>
-                  <button
-                    type="button"
-                    onClick={() => handleWorkSelect(w)}
-                    disabled={loading}
-                    className="w-full text-left rounded-md border p-3 hover:bg-slate-50 transition-colors"
-                  >
-                    <div className="text-sm font-medium text-slate-900">
-                      {w.title}
-                    </div>
-                    {w.authors?.length && (
-                      <div className="text-xs text-slate-500">
-                        by {w.authors.join(', ')}
-                      </div>
-                    )}
-                    {w.first_publish_year && (
-                      <div className="text-xs text-slate-400">
-                        {w.first_publish_year}
-                      </div>
-                    )}
-                  </button>
-                </li>
-              ))}
-            </ul>
-          </div>
-        )}
-
-        {/* Manual fields (always available for direct input) */}
-        <div className="space-y-2">
-          <h4 className="text-sm font-medium text-slate-700">
-            Or enter details manually:
-          </h4>
           {renderField('Title', form.title, 'title', true)}
           {renderField('Subtitle', form.subtitle, 'subtitle')}
           {renderField('Authors', form.authors, 'authors')}
@@ -701,20 +712,28 @@ const AddBookDialogComponent = forwardRef<
           {renderField('Pages', form.pages, 'pages')}
         </div>
 
-        {/* Continue to review step */}
+        {/* Save action */}
         <button
-          onClick={() => setStep('review')}
-          className="w-full mt-2 rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700"
+          onClick={handleSubmit}
+          disabled={loading || !form.title?.trim()}
+          className="w-full rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700 disabled:opacity-50"
         >
-          Continue to Review →
+          {loading ? 'Saving...' : 'Save Book'}
         </button>
+
+        {/* Error in search step */}
+        {formError && (
+          <div className="p-3 bg-red-50 text-sm text-red-700 rounded-lg">
+            {formError}
+          </div>
+        )}
       </div>
     );
   }
 
-  /* ── review/save step ─────────────── */
+  /* ── save/review step ─────────────── */
 
-  function renderReviewStep(): React.ReactElement {
+  function renderSaveStep(): React.ReactElement {
     const isSelectable = !isOwner && !isLibrarian;
 
     return (
@@ -889,7 +908,7 @@ const AddBookDialogComponent = forwardRef<
               )}
             </>
           )}
-          {step === 'review' && renderReviewStep()}
+          {step === 'save' && renderSaveStep()}
           {step === 'saved' && (
             <div className="p-6 bg-green-50 text-sm text-green-700 rounded-lg text-center">
               <span className="text-2xl block mb-2">✅</span>
