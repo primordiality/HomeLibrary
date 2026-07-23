@@ -166,7 +166,7 @@ function CatalogContent() {
         if (bookIds.length > 0) {
             const { data: booksData, error: bmErr } = await supabase
                 .from('books')
-                .select('id, title, subtitle, authors, cover_url, publish_date, edition')
+                .select('id, title, subtitle, authors, cover_url, publish_date, edition, isbn')
                 .in('id', bookIds);
             if (bmErr) console.error('batch books query failed:', bmErr);
             if (booksData) {
@@ -205,7 +205,7 @@ function CatalogContent() {
                 (e: any) => (e.title || '').toLowerCase().includes(q) ||
                      (e.subtitle || '').toLowerCase().includes(q) ||
                      (e.authors || []).some((a: string) => a.toLowerCase().includes(q)) ||
-                     (e.isbn || '').includes(query)
+                     (e.isbn || '').includes(q)
             );
         }
 
