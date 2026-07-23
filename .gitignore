@@ -22,3 +22,5 @@ supabase/README.md
 # OS
 .DS_Store
 *.log
+.vercel
+.env*

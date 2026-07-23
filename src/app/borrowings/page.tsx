@@ -1,5 +1,5 @@
 'use client';
-import { useState, useEffect, Suspense } from 'react';
+import { useState, useEffect, Suspense, useRef } from 'react';
 import { useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import { supabase } from '@/lib/supabase/client';
@@ -54,6 +54,51 @@ function BorrowingsContent() {
 
   // Hold queues for position calculation
   const [bookHoldQueues, setBookHoldQueues] = useState<Record<string, any[]>>({});
+
+  // Enrich borrow→book cache whenever borrows load
+  useEffect(() => {
+    if (activeBorrows.length === 0) return;
+    const copyIds = activeBorrows.map((b: any) => b.copy_id);
+    const missing = copyIds.filter((id: string) => !copyCache.current.has(id));
+    if (missing.length === 0) return;
+
+    (async () => {
+      try {
+        const { data: copies } = await supabase
+          .from('book_copies')
+          .select('id, book_id')
+          .in('id', missing);
+        if (copies) {
+          for (const c of copies) {
+            copyCache.current.set(c.id, c.book_id);
+          }
+        }
+
+        const allBookIds = [...new Set(copyCache.current.values())];
+        const newBookIds = allBookIds.filter((id: string) => !bookCache.current.has(id));
+        if (newBookIds.length === 0) return;
+
+        const { data: books } = await supabase
+          .from('books')
+          .select('id, title, cover_url')
+          .in('id', newBookIds);
+        if (books) {
+          for (const b of books) {
+            bookCache.current.set(b.id, { title: b.title || 'Untitled', cover_url: b.cover_url });
+          }
+          setBooksMap(prev => {
+            const next = { ...prev };
+            for (const b of books) {
+              next[b.id] = { title: b.title || 'Untitled', cover_url: b.cover_url };
+            }
+            return next;
+          });
+        }
+      } catch (e) {
+        console.error('Failed to enrich book cache:', e);
+      }
+    })();
+  }, [activeBorrows]);
 
   // Load current user when modal opens
   useEffect(() => {
@@ -370,50 +415,22 @@ function BorrowingsContent() {
         }
       }
     }
-    const bookIdFromBorrow = copyBookIdCache[copyId];
+    const bookIdFromBorrow = copyCache.current.get(copyId);
     return bookIdFromBorrow || null;
   }
 
-  // Helper: get book title by looking at copy's book_id
-  const copyBookIdCache: Record<string, string> = {};
-  useEffect(() => {
-    async function enrichBorrows() {
-      const copyIds = activeBorrows.map((b: any) => b.copy_id);
-      if (copyIds.length === 0) return;
-      const { data: copies } = await supabase
-        .from('book_copies')
-        .select('id, book_id')
-        .in('id', copyIds);
-      if (copies) {
-        for (const c of copies) {
-          copyBookIdCache[c.id] = c.book_id;
-        }
-      }
-      const bookIds = [...new Set(Object.values(copyBookIdCache))];
-      if (bookIds.length === 0) return;
-      const { data: books } = await supabase
-        .from('books')
-        .select('id, title, cover_url')
-        .in('id', bookIds);
-      if (books) {
-        const map: Record<string, { title: string; cover_url: string | null }> = {};
-        for (const b of books) {
-          map[b.id] = { title: b.title || 'Untitled', cover_url: b.cover_url };
-        }
-        setBooksMap(map);
-      }
-    }
-    enrichBorrows();
-  }, [activeBorrows]);
+  // ─── Stable book cache across renders ───
+  const bookCache = useRef<Map<string, { title: string; cover_url: string | null }>>(new Map());
+  const copyCache = useRef<Map<string, string>>(new Map()); // copyId -> bookId
 
   function copyTitle(copyId: string): string {
-    const bookId = copyBookIdCache[copyId];
+    const bookId = copyCache.current.get(copyId);
     if (bookId) return booksMap[bookId]?.title || 'Untitled';
     return 'Loading...';
   }
 
   function copyCover(copyId: string): string | null {
-    const bookId = copyBookIdCache[copyId];
+    const bookId = copyCache.current.get(copyId);
     return bookId ? booksMap[bookId]?.cover_url || null : null;
   }
 
@@ -460,7 +477,7 @@ function BorrowingsContent() {
   function copiesAvailableForBook(bookId: string): boolean {
     if (!copiesByBook[bookId]) return false;
     const checkedOutCopyIds = new Set(displayLoans.filter(l => {
-      const bid = copyBookIdCache[l.copy_id];
+      const bid = copyCache.current.get(l.copy_id);
       return bid === bookId;
     }).map(l => l.copy_id));
     return copiesByBook[bookId].some((c: any) => !checkedOutCopyIds.has(c.id));
@@ -496,7 +513,7 @@ function BorrowingsContent() {
     const copies = resolvedCopiesByBook[bookId] || [];
     if (copies.length === 0) return false;
     const checkedOutCopyIds = new Set(displayLoans.filter(l => {
-      const bid = copyBookIdCache[l.copy_id];
+      const bid = copyCache.current.get(l.copy_id);
       return bid === bookId;
     }).map(l => l.copy_id));
     return copies.some((c: any) => !checkedOutCopyIds.has(c.id));
