@@ -166,7 +166,7 @@ function CatalogContent() {
         if (bookIds.length > 0) {
             const { data: booksData, error: bmErr } = await supabase
                 .from('books')
-                .select('id, title, subtitle, authors, cover_url')
+                .select('id, title, subtitle, authors, cover_url, publish_date, edition')
                 .in('id', bookIds);
             if (bmErr) console.error('batch books query failed:', bmErr);
             if (booksData) {
@@ -189,6 +189,8 @@ function CatalogContent() {
                 authors: book?.authors ?? [],
                 cover_url: book?.cover_url ?? null,
                 isbn: (book as any)?.isbn ?? null,
+                publish_date: book?.publish_date ?? null,
+                edition: book?.edition ?? null,
                 library_id: copy.library_id,
                 availability: avail,
                 copy_settings: bookSettingsMap[bookId],
@@ -390,6 +392,20 @@ function CatalogContent() {
                     {/* Show when no library assigned */}
                     {!showAll && !book.library_id && (
                       <p className="text-xs text-slate-400 mt-1">No library copy</p>
+                    )}
+
+                    {/* Edition */}
+                    {book.edition && (
+                      <p className="text-xs text-slate-500 mt-1">
+                        {book.edition}
+                      </p>
+                    )}
+
+                    {/* Publish Date */}
+                    {book.publish_date && (
+                      <p className="text-xs text-slate-500 mt-1">
+                        {book.publish_date}
+                      </p>
                     )}
 
                     {/* Availability badge */}
