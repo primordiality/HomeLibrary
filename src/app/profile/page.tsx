@@ -38,7 +38,6 @@ export default function ProfilePage() {
 
   // Toast management
   const [toasts, setToasts] = useState<ToastType[]>([]);
-  const toastIdRef = useState(0)[1];
 
   function toast(message: string, type: 'success' | 'error' | 'info') {
     const id = Date.now() + Math.random();
@@ -48,7 +47,7 @@ export default function ProfilePage() {
     }, 4000);
   }
 
-  // Profile name editing
+  // Profile name editing — initialized once from profile on mount
   const [nameForm, setNameForm] = useState({
     first_name: profile?.first_name || '',
     last_name: profile?.last_name || '',
@@ -65,14 +64,6 @@ export default function ProfilePage() {
   const [newPw, setNewPw] = useState('');
   const [confirmPw, setConfirmPw] = useState('');
   const [pwSaving, setPwSaving] = useState(false);
-
-  useEffect(() => {
-    setNameForm({
-      first_name: profile?.first_name || '',
-      last_name: profile?.last_name || '',
-      name: profile?.name || '',
-    });
-  }, [profile]);
 
   useEffect(() => {
     if (!user || authLoading) return;
