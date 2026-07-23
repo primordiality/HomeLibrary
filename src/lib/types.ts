@@ -7,6 +7,7 @@ export interface BookData {
   subtitle: string;
   authors: string;
   publisher: string;
+  edition: string;
   publish_date: string;
   pages: number | null;
   cover_url: string;

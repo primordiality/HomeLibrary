@@ -4,7 +4,7 @@ import type { BookData, CopyData } from './types';
 
 export const BOOK_DEFAULT: BookData = {
   id: '', isbn: '', title: '', subtitle: '', authors: '', publisher: '',
-  publish_date: '', pages: null as number | null, cover_url: '', genres_str: '', notes: '',
+  edition: '', publish_date: '', pages: null as number | null, cover_url: '', genres_str: '', notes: '',
 };
 
 export const COPY_DEFAULT: CopyData = {

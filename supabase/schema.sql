@@ -97,8 +97,9 @@ CREATE TABLE books (
     publish_date text,   -- text: stores year-only values from OpenLibrary without validation
     pages integer,
     language text,
+    edition text,
     cover_url text,
-    genres text[] DEFAULT '{}', 
+    genres text[] DEFAULT '{}',
     notes text,
     created_at timestamptz NOT NULL DEFAULT now()
 );

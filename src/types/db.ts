@@ -47,6 +47,7 @@ export interface Book {
   subtitle?: string | null     // e.g., "The Second Book of Isaac Asimov"
   authors?: string[] | null    // ["Asimov, Isaac", "Silverberg, Robert"]
   publisher?: string | null
+  edition?: string | null       // edition e.g. "1st edition", "2nd ed."
   publish_date?: string | null // YYYY-MM-DD
   pages?: number | null         // total page count
   language?: string | null     // ISO 639-1: "en", "fr", etc.

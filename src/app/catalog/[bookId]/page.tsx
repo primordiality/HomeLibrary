@@ -436,6 +436,12 @@ export default function BookDetailPage({ params }: { params: { bookId: string } 
               <dd className="text-slate-900">{book.publisher}</dd>
             </div>
           )}
+          {book.edition && (
+            <div>
+              <dt className="text-slate-500">Edition</dt>
+              <dd className="text-slate-900">{book.edition}</dd>
+            </div>
+          )}
           {book.publish_date && (
             <div>
               <dt className="text-slate-500">Published</dt>

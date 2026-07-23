@@ -17,6 +17,7 @@ export default function EditBookPage() {
   const [subtitle, setSubtitle] = useState('');
   const [authors, setAuthors] = useState('');
   const [publisher, setPublisher] = useState('');
+  const [edition, setEdition] = useState('');
   const [publishYear, setPublishYear] = useState('');
   const [pagesStr, setPagesStr] = useState('');
   const [notes, setNotes] = useState('');
@@ -87,6 +88,7 @@ export default function EditBookPage() {
     setSubtitle((book.subtitle as string) || '');
     const al = book.authors; if (Array.isArray(al)) setAuthors(al.join(', '));
     setPublisher((book.publisher as string) || '');
+    setEdition((book.edition as string) || '');
     setPublishYear((book.publish_date as string) || '');
     setPagesStr(String(book.pages ?? ''));
     setNotes((book.notes as string) || '');
@@ -172,6 +174,7 @@ export default function EditBookPage() {
       subtitle: subtitle.trim() || null,
       authors: authors.split(',').map((s: string) => s.trim()).filter(Boolean),
       publisher: publisher.trim() || null,
+      edition: edition.trim() || null,
       publish_date: publishYear.trim() || null,
       pages: parseInt(pagesStr, 10) || null,
       notes: notes.trim() || null,
@@ -315,12 +318,12 @@ export default function EditBookPage() {
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
               <div><label htmlFor="p-f" className="block text-sm font-medium text-slate-700 mb-1">Publisher</label><input id="p-f" type="text" value={publisher} onChange={(e) => setPublisher(e.target.value)} className="w-full rounded-lg border border-slate-300 px-4 py-2 text-sm focus:border-indigo-500 focus:ring-indigo-500" /></div>
-              <div><label htmlFor="pg-f" className="block text-sm font-medium text-slate-700 mb-1">Pages</label><input id="pg-f" type="number" value={pagesStr} placeholder="352" min={0} onChange={(e) => setPagesStr(e.target.value)} className="w-full rounded-lg border border-slate-300 px-4 py-2 text-sm focus:border-indigo-500 focus:ring-indigo-500" /></div>
+              <div><label htmlFor="e-f" className="block text-sm font-medium text-slate-700 mb-1">Edition</label><input id="e-f" type="text" value={edition} placeholder="e.g. 1st edition, 2nd ed." onChange={(e) => setEdition(e.target.value)} className="w-full rounded-lg border border-slate-300 px-4 py-2 text-sm focus:border-indigo-500 focus:ring-indigo-500" /></div>
             </div>
 
-            <div className="mb-4">
-              <label htmlFor="d-f" className="block text-sm font-medium text-slate-700 mb-1">Publish Date</label>
-              <input id="d-f" type="text" value={publishYear} placeholder="e.g. 1987" onChange={(e) => setPublishYear(e.target.value)} className="w-full rounded-lg border border-slate-300 px-4 py-2 text-sm focus:border-indigo-500 focus:ring-indigo-500" />
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+              <div><label htmlFor="pg-f" className="block text-sm font-medium text-slate-700 mb-1">Pages</label><input id="pg-f" type="number" value={pagesStr} placeholder="352" min={0} onChange={(e) => setPagesStr(e.target.value)} className="w-full rounded-lg border border-slate-300 px-4 py-2 text-sm focus:border-indigo-500 focus:ring-indigo-500" /></div>
+              <div><label htmlFor="pd-f" className="block text-sm font-medium text-slate-700 mb-1">Publish Date</label><input id="pd-f" type="text" value={publishYear} placeholder="e.g. 1987" onChange={(e) => setPublishYear(e.target.value)} className="w-full rounded-lg border border-slate-300 px-4 py-2 text-sm focus:border-indigo-500 focus:ring-indigo-500" /></div>
             </div>
 
             <div className="mb-5">

@@ -13,6 +13,7 @@ function ok(res: Response) {
 async function fetchBookByIsbn(isbnRaw: string): Promise<{
   title?: string;
   subtitle?: string;
+  edition?: string;
   authors?: string[];
   publisher?: string;
   publishDate?: string;
@@ -34,6 +35,7 @@ async function fetchBookByIsbn(isbnRaw: string): Promise<{
       return {
         title: b.title,
         subtitle: undefined,
+        edition: b.edition ? typeof b.edition === 'string' ? b.edition : String(b.edition) : undefined,
         authors: b.author_name?.slice(0, 3),
         publisher: b.publisher_name?.[0],
         publishDate: b.first_publish_year ? `${b.first_publish_year}` : undefined,
@@ -53,6 +55,7 @@ async function fetchBookByIsbn(isbnRaw: string): Promise<{
       return {
         title: b.title,
         subtitle: undefined,
+        edition: b.edition ? typeof b.edition === 'string' ? b.edition : String(b.edition) : undefined,
         authors: b.author_name?.slice(0, 3),
         publisher: b.publisher_name?.[0],
         publishDate: b.first_publish_year ? `${b.first_publish_year}` : undefined,
@@ -71,6 +74,7 @@ async function fetchBookByIsbn(isbnRaw: string): Promise<{
       return {
         title: data.title,
         subtitle: undefined, // edition-level usually doesn't have separate field
+        edition: data.edition ? String(data.edition) : undefined,
         authors: data.authors?.name ?? data.authors ?? [],
         publisher: data.publishers?.[0],
         publishDate: data.first_publish_date,
@@ -150,7 +154,7 @@ async function searchWorksByTitle(
     // Only return fields we care about (saves bandwidth)
     params.set(
       'fields',
-      'key,title,subtitle,author_name,isbn,publisher_name,' +
+      'key,title,subtitle,author_name,isbn,publisher_name,edition,' +
         'first_publish_year,cover_edition_id,cover_i,number_of_pages',
     );
 
@@ -163,6 +167,7 @@ async function searchWorksByTitle(
         key: string;
         title: string;
         subtitle?: string;
+        edition?: string;
         authors?: string[];
         ISBN?: string[];
         publisher?: string[];
@@ -173,6 +178,7 @@ async function searchWorksByTitle(
         key: doc.key,
         title: doc.title ?? '',
         subtitle: undefined, // not returned by search — fetch edition for that
+        edition: doc.edition ? String(doc.edition) : undefined,
         authors: doc.author_name?.slice(0, 3),
         ISBN: doc.isbn?.filter((i: string) =>
           i.replace(/[^0-9]/g, '').length === 10 ||

@@ -16,6 +16,7 @@ type OLWork = {
   key: string;
   title: string;
   subtitle?: string;
+  edition?: string;
   authors?: string[];
   ISBN?: string[];
   publisher?: string[];
@@ -30,6 +31,7 @@ type FormValues = {
   subtitle: string;
   authors: string;
   publisher: string;
+  edition: string;
   publishDate: string;
   pages: string;
   coverUrl: string;
@@ -92,7 +94,7 @@ const AddBookDialogComponent = forwardRef<
   // book data
   const [form, setForm] = useState<FormValues>({
     isbn: '', title: '', subtitle: '', authors: '',
-    publisher: '', publishDate: '', pages: '', coverUrl: '',
+    publisher: '', edition: '', publishDate: '', pages: '', coverUrl: '',
   });
   const [coverImageData, setCoverImageData] = useState<{ bytes: number[]; contentType: string } | null>(null);
   const [coverLoading, setCoverLoading] = useState(false);
@@ -121,7 +123,7 @@ const AddBookDialogComponent = forwardRef<
 
   const formDefault = (): FormValues => ({
     isbn: '', title: '', subtitle: '', authors: '',
-    publisher: '', publishDate: '', pages: '', coverUrl: '',
+    publisher: '', edition: '', publishDate: '', pages: '', coverUrl: '',
   });
 
   /* ── Effect: resolve user's library on dialog open ── */
@@ -219,6 +221,7 @@ const AddBookDialogComponent = forwardRef<
       subtitle: '', // search doesn't return this reliably
       authors: work.authors?.join(', ') ?? '',
       publisher: work.publisher?.[0] ?? '',
+      edition: work.edition ?? '',
       publishDate: work.first_publish_year
         ? String(work.first_publish_year)
         : '',
@@ -238,6 +241,7 @@ const AddBookDialogComponent = forwardRef<
         subtitle: metadata.subtitle || '',
         authors: (metadata.authors || []).join(', '),
         publisher: metadata.publisher || '',
+        edition: metadata.edition || '',
         publishDate: String(metadata.publishDate),
         pages: metadata.pages ? String(metadata.pages) : '',
         coverUrl: metadata.coverUrl || '',
@@ -370,6 +374,7 @@ const AddBookDialogComponent = forwardRef<
           ? [form.authors.split(',')[0]!.trim()]
           : [],
         publisher: form.publisher?.trim() || null,
+        edition: form.edition?.trim() || null,
         publish_date: form.publishDate?.trim() || null,
         pages: parseInt(form.pages, 10) || null,
         cover_url: coverUrl,
@@ -691,6 +696,7 @@ const AddBookDialogComponent = forwardRef<
           {renderField('Subtitle', form.subtitle, 'subtitle')}
           {renderField('Authors', form.authors, 'authors')}
           {renderField('Publisher', form.publisher, 'publisher')}
+          {renderField('Edition', form.edition, 'edition')}
           {renderField('Publish Date', form.publishDate, 'publishDate')}
           {renderField('Pages', form.pages, 'pages')}
         </div>
@@ -808,6 +814,7 @@ const AddBookDialogComponent = forwardRef<
           {renderField('Subtitle', form.subtitle, 'subtitle')}
           {renderField('Authors', form.authors, 'authors')}
           {renderField('Publisher', form.publisher, 'publisher')}
+          {renderField('Edition', form.edition, 'edition')}
           {renderField('Publish Date', form.publishDate, 'publishDate')}
           {renderField('Pages', form.pages, 'pages')}
         </div>
