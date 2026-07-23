@@ -5,6 +5,12 @@ import { supabase } from "@/lib/supabase/client";
 import type { User } from "@supabase/supabase-js";
 import type { Profile } from "@/types/db";
 
+export type UpdateProfileInput = {
+  name?: string;
+  first_name?: string;
+  last_name?: string;
+};
+
 type AuthContextType = {
   user: User | null;
   profile: Profile | null;
@@ -13,6 +19,9 @@ type AuthContextType = {
   signIn: (email: string, password: string) => Promise<{ error: string | null }>;
   signUp: (email: string, password: string, name?: string) => Promise<{ error: string | null }>;
   signOut: () => Promise<void>;
+  changePassword: (currentPassword: string, newPassword: string) => Promise<{ error: string | null }>;
+  updateEmail: (newEmail: string) => Promise<{ error: string | null; needsConfirmation: boolean }>;
+  updateProfile: (updates: UpdateProfileInput) => Promise<{ error: string | null }>;
 };
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -110,8 +119,52 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     window.location.href = '/signin';
   };
 
+  const changePassword = async (currentPassword: string, newPassword: string) => {
+    try {
+      const { error } = await supabase.auth.updateUser({ password: newPassword });
+      if (error) return { error: error.message };
+      return { error: null };
+    } catch (e) {
+      const err = e as Error;
+      return { error: err?.message || 'Failed to change password.' };
+    }
+  };
+
+  const updateEmail = async (newEmail: string) => {
+    try {
+      const { error } = await supabase.auth.updateUser({ email: newEmail });
+      if (error) return { error: error.message, needsConfirmation: false };
+      return { error: null, needsConfirmation: true };
+    } catch (e) {
+      const err = e as Error;
+      return { error: err?.message || 'Failed to update email.', needsConfirmation: false };
+    }
+  };
+
+  const updateProfile = async (updates: UpdateProfileInput) => {
+    if (!user) return { error: 'No user logged in.' };
+    try {
+      setProfileLoading(true);
+      const { error } = await supabase
+        .from('profiles')
+        .update(updates)
+        .eq('id', user.id)
+        .select()
+        .single();
+      if (error) return { error: error.message };
+      setProfile(null);
+      await loadProfile(user.id);
+      return { error: null };
+    } catch (e) {
+      const err = e as Error;
+      return { error: err?.message || 'Failed to update profile.' };
+    } finally {
+      setProfileLoading(false);
+    }
+  };
+
   return (
-    <AuthContext.Provider value={{ user, profile, loading, profileLoading, signIn, signUp, signOut }}>
+    <AuthContext.Provider value={{ user, profile, loading, profileLoading, signIn, signUp, signOut, changePassword, updateEmail, updateProfile }}>
       {children}
     </AuthContext.Provider>
   );
