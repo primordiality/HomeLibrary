@@ -7,7 +7,8 @@ export interface Profile {
   first_name?: string | null    // first name (manual patrons)
   last_name?: string | null     // last name (manual patrons)
   role: 'system_admin' | 'library_owner' | 'librarian' | 'patron'
-  status?: 'pending' | 'active' | 'suspended'  // account status for approval flow
+  status?: 'pending' | 'active' | 'suspended' | 'deleted'  // account status for approval flow
+  deleted_at?: string | null    // soft delete timestamp
   created_at: string            // ISO datetime
 }
 

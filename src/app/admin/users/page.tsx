@@ -46,6 +46,22 @@ export default function AdminUsers() {
   const [lastName, setLastName] = useState("");
   const [editingName, setEditingName] = useState("");
   const [savingName, setSavingName] = useState(false);
+
+  // Suspend/Activate
+  const [showSuspendModal, setShowSuspendModal] = useState(false);
+  const [suspendModalUser, setSuspendModalUser] = useState<{ id: string; name: string; status?: Profile["status"] } | null>(null);
+  const [suspending, setSuspending] = useState(false);
+
+  // Delete
+  const [showDeleteModal, setShowDeleteModal] = useState(false);
+  const [deleteModalUser, setDeleteModalUser] = useState<{ id: string; name: string; role: string } | null>(null);
+  const [deleteConfirmation, setDeleteConfirmation] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const [deleteResult, setDeleteResult] = useState<{ borrowsEscalated: number; holdsReleased: number; libraryArchived: boolean } | null>(null);
+
+  const [showSuspended, setShowSuspended] = useState(true);
+  const [showDeleted, setShowDeleted] = useState(false);
+
   const { user } = useAuth();
   const selfId = user?.id;
   const adminCount = users.filter(u => u.role === "system_admin").length;
@@ -54,7 +70,7 @@ export default function AdminUsers() {
     try {
       const { data, error } = await supabase
         .from("profiles")
-        .select("id, name, email, role, created_at")
+        .select("id, name, email, role, status, deleted_at, created_at")
         .order("created_at", { ascending: false });
 
       if (error) {
@@ -259,8 +275,6 @@ export default function AdminUsers() {
 
     setResetting(true);
     try {
-      // Use the existing send-invite edge function pattern to trigger a password reset
-      // This is the same approach used in handleCreateUser for invites
       const response = await fetch(
         `${process.env.NEXT_PUBLIC_SUPABASE_URL!}/functions/v1/send-password-reset`,
         {
@@ -274,10 +288,6 @@ export default function AdminUsers() {
       );
 
       if (!response.ok) {
-        // Edge function may not exist yet — fall back to profile-based reset
-        // Generate a recovery link using the anon key's session trick:
-        // Actually, use profiles to signal a reset is needed, then email via a Supabase Edge Function
-        // For now, create a signal row that triggers an email via DB webhook
         const { error: signalErr } = await supabase
           .from("password_reset_tokens")
           .insert({
@@ -286,7 +296,6 @@ export default function AdminUsers() {
           });
 
         if (signalErr) {
-          // No signal table — just inform the user
           showToast(`Password reset email sent to ${resetModalUser.email}`);
         } else {
           showToast(`Password reset email sent to ${resetModalUser.email}`);
@@ -310,9 +319,6 @@ export default function AdminUsers() {
 
     setChangingEmail(true);
     try {
-      // Update in profiles table (anon key can update profiles if RLS allows)
-      // For admin functionality, we need to update the email on the user's profile
-      // We'll use direct DB update since this is an admin panel
       const { error: profileErr } = await supabase
         .from("profiles")
         .update({ email: newEmail.trim() })
@@ -368,9 +374,102 @@ export default function AdminUsers() {
     }
   };
 
+  // ── Suspend/Activate ────────────────────────────────────────────
+  const handleSuspend = async () => {
+    setError(null);
+    if (!suspendModalUser) return;
+
+    setSuspending(true);
+    try {
+      const newStatus = suspendModalUser.status === "suspended" ? "active" : "suspended";
+      const { error } = await supabase
+        .from("profiles")
+        .update({ status: newStatus })
+        .eq("id", suspendModalUser.id);
+
+      if (error) {
+        setError(`Failed to update status: ${error.message}`);
+        setSuspending(false);
+        return;
+      }
+
+      showToast(`${suspendModalUser.name || "User"} marked as ${newStatus}.`);
+      setShowSuspendModal(false);
+      setSuspendModalUser(null);
+      await loadUsers();
+    } catch (e) {
+      setError("Failed to update status. Check your connection.");
+    } finally {
+      setSuspending(false);
+    }
+  };
+
+  // ── Delete ──────────────────────────────────────────────────────
+  const handleDelete = async () => {
+    setError(null);
+    if (!deleteModalUser) return;
+
+    setDeleting(true);
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      const accessToken = session?.access_token;
+
+      if (!accessToken) {
+        setError("Please sign in again to delete users.");
+        setDeleting(false);
+        return;
+      }
+
+      const response = await fetch(
+        `${process.env.NEXT_PUBLIC_SUPABASE_URL!}/functions/v1/delete-user`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${accessToken}`,
+          },
+          body: JSON.stringify({ profileId: deleteModalUser.id }),
+        }
+      );
+
+      const result = await response.json();
+
+      if (!response.ok) {
+        setError(result.error || "Failed to delete user.");
+        setDeleting(false);
+        return;
+      }
+
+      setDeleteResult({
+        borrowsEscalated: result.borrows_escalated || 0,
+        holdsReleased: result.holds_released || 0,
+        libraryArchived: result.library_archived || false,
+      });
+
+      setTimeout(() => {
+        setShowDeleteModal(false);
+        setDeleteModalUser(null);
+        setDeleteConfirmation(false);
+        setDeleteResult(null);
+        setDeleting(false);
+        loadUsers();
+      }, 2000);
+    } catch (e) {
+      setError("Failed to delete user. Check your connection.");
+      setDeleting(false);
+    }
+  };
+
   const filteredLibraries = libraries.filter(lib =>
     lib.name.toLowerCase().includes(librarySearch.toLowerCase())
   );
+
+  // Filter users based on toggles
+  const filteredUsers = users.filter(u => {
+    if (!showSuspended && u.status === "suspended") return false;
+    if (!showDeleted && u.deleted_at) return false;
+    return true;
+  });
 
   return (
     <div className="space-y-6">
@@ -401,6 +500,28 @@ export default function AdminUsers() {
         </div>
       )}
 
+      {/* Filter toggles */}
+      <div className="flex items-center gap-6">
+        <label className="flex items-center gap-2 cursor-pointer">
+          <input
+            type="checkbox"
+            checked={showSuspended}
+            onChange={(e) => setShowSuspended(e.target.checked)}
+            className="h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
+          />
+          <span className="text-sm text-slate-700">Show suspended</span>
+        </label>
+        <label className="flex items-center gap-2 cursor-pointer">
+          <input
+            type="checkbox"
+            checked={showDeleted}
+            onChange={(e) => setShowDeleted(e.target.checked)}
+            className="h-4 w-4 rounded border-slate-300 text-slate-400 focus:ring-slate-500"
+          />
+          <span className="text-sm text-slate-700">Show deleted</span>
+        </label>
+      </div>
+
       {loading ? (
         <div className="text-center py-12 text-sm text-slate-400">Loading users…</div>
       ) : (
@@ -410,49 +531,94 @@ export default function AdminUsers() {
               <tr className="text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
                 <th className="px-4 py-3">Name</th>
                 <th className="px-4 py-3">Email</th>
-                <th className="px-4 py-3">Role</th>
+                <th className="px-4 py-3">Role / Status</th>
                 <th className="px-4 py-3">Registered</th>
                 <th className="px-4 py-3 text-right">Actions</th>
               </tr>
             </thead>
             <tbody className="divide-y">
-              {users.length === 0 ? (
+              {filteredUsers.length === 0 ? (
                 <tr>
                   <td colSpan={5} className="py-8 text-center text-slate-400">
                     No users found.
                   </td>
                 </tr>
               ) : (
-                users.map((u) => {
+                filteredUsers.map((u) => {
                   const isPatron = u.role === "patron";
                   const isSysAdmin = u.role === "system_admin";
                   const isSelf = u.id === selfId;
+                  const isDeleted = !!u.deleted_at;
+                  const isDeletable = u.role && ['patron', 'librarian', 'library_owner'].includes(u.role) && !isSysAdmin;
 
                   return (
-                    <tr key={u.id} className="hover:bg-slate-50 transition">
-                      <td className="px-4 py-3 font-medium text-slate-900">
+                    <tr
+                      key={u.id}
+                      className={`hover:bg-slate-50 transition ${
+                        isDeleted ? "bg-slate-50" : ""
+                      }`}
+                    >
+                      <td className={`px-4 py-3 font-medium ${
+                        isDeleted ? "line-through text-slate-400" : "text-slate-900"
+                      }`}>
                         {u.name || "—"}
                       </td>
-                      <td className="px-4 py-3 text-slate-600">{u.email || "—"}</td>
-                      <td className="px-4 py-3">
-                        <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${
-                          isSysAdmin
-                            ? "bg-purple-100 text-purple-800"
-                            : u.role === "library_owner"
-                            ? "bg-blue-100 text-blue-800"
-                            : u.role === "librarian"
-                            ? "bg-teal-100 text-teal-800"
-                            : "bg-slate-100 text-slate-700"
-                        }`}>
-                          {u.role.replace("_", " ")}
-                        </span>
+                      <td className={`px-4 py-3 ${
+                        isDeleted ? "line-through text-slate-400" : "text-slate-600"
+                      }`}>
+                        {u.email || "—"}
                       </td>
-                      <td className="px-4 py-3 text-slate-500">
+                      <td className="px-4 py-3">
+                        <div className="flex items-center gap-1.5">
+                          {/* Role badge */}
+                          <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${
+                            u.role === "system_admin"
+                              ? "bg-purple-100 text-purple-800"
+                              : u.role === "library_owner"
+                              ? "bg-blue-100 text-blue-800"
+                              : u.role === "librarian"
+                              ? "bg-teal-100 text-teal-800"
+                              : "bg-slate-100 text-slate-700"
+                          }`}>
+                            {u.role?.replace("_", " ")}
+                          </span>
+                          {/* Status badge */}
+                          <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${
+                            u.status === "active"
+                              ? "bg-green-100 text-green-800"
+                              : u.status === "pending"
+                              ? "bg-amber-100 text-amber-800"
+                              : u.status === "suspended"
+                              ? "bg-red-100 text-red-800"
+                              : u.status === "deleted"
+                              ? "bg-gray-100 text-gray-800"
+                              : "bg-slate-100 text-slate-500"
+                          }`}>
+                            {u.status === "deleted" ? "deleted" : (u.status || "active")}
+                          </span>
+                        </div>
+                      </td>
+                      <td className={`px-4 py-3 ${
+                        isDeleted ? "line-through text-slate-400" : "text-slate-500"
+                      }`}>
                         {u.created_at ? new Date(u.created_at).toLocaleDateString() : "—"}
                       </td>
                       <td className="px-4 py-3 text-right space-x-1">
-                        {!isSelf && (
+                        {!isSelf && !isDeleted && (
                           <>
+                            <button
+                              onClick={() => {
+                                setSuspendModalUser({ id: u.id, name: u.name || "", status: u.status });
+                                setShowSuspendModal(true);
+                              }}
+                              className={`text-xs font-medium px-2.5 py-1 rounded border transition ${
+                                u.status === "suspended"
+                                  ? "text-green-700 bg-green-50 hover:bg-green-100 border-green-200"
+                                  : "text-red-700 bg-red-50 hover:bg-red-100 border-red-200"
+                              }`}
+                            >
+                              {u.status === "suspended" ? "Activate" : "Suspend"}
+                            </button>
                             <button
                               onClick={() => {
                                 setRoleModalUser({ id: u.id, name: u.name || "" });
@@ -499,10 +665,26 @@ export default function AdminUsers() {
                                 Reset Password
                               </button>
                             )}
+                            {isDeletable && (
+                              <button
+                                onClick={() => {
+                                  setDeleteModalUser({ id: u.id, name: u.name || "", role: u.role || "" });
+                                  setDeleteConfirmation(false);
+                                  setDeleteResult(null);
+                                  setShowDeleteModal(true);
+                                }}
+                                className="text-xs font-medium text-red-700 bg-red-50 hover:bg-red-100 px-2.5 py-1 rounded border border-red-200 transition"
+                              >
+                                Delete
+                              </button>
+                            )}
                           </>
                         )}
                         {isSelf && (
                           <span className="text-xs font-medium text-slate-400">You</span>
+                        )}
+                        {isDeleted && isSelf && (
+                          <span className="text-xs font-medium text-gray-400">You</span>
                         )}
                       </td>
                     </tr>
@@ -965,6 +1147,168 @@ export default function AdminUsers() {
                 {savingName ? "Saving…" : "Save Name"}
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* Suspend/Activate Confirmation Modal */}
+      {showSuspendModal && suspendModalUser && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
+          <div className="w-full max-w-sm bg-white rounded-xl shadow-xl p-6 space-y-4">
+            <div className="flex items-center justify-between">
+              <h2 className="text-lg font-semibold text-slate-900">
+                {suspendModalUser.status === "suspended" ? "Activate User" : "Suspend User"}
+              </h2>
+              <button
+                onClick={() => {
+                  setShowSuspendModal(false);
+                  setSuspendModalUser(null);
+                }}
+                className="text-slate-400 hover:text-slate-600"
+              >
+                <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+
+            <p className="text-sm text-slate-600">
+              {suspendModalUser.status === "suspended"
+                ? `Activate user <span className="font-medium text-slate-900">${suspendModalUser.name}</span>? They will be able to log in again.`
+                : `Suspend user <span className="font-medium text-slate-900">${suspendModalUser.name}</span>? They will be locked out of the system.`}
+            </p>
+
+            {error && (
+              <div className="p-2 text-sm text-red-700 bg-red-50 rounded-lg">
+                {error}
+              </div>
+            )}
+
+            <div className="flex gap-3 pt-2">
+              <button
+                onClick={() => {
+                  setShowSuspendModal(false);
+                  setSuspendModalUser(null);
+                }}
+                className="flex-1 px-4 py-2 text-sm font-medium text-slate-700 bg-white border border-slate-300 rounded-lg hover:bg-slate-50 transition"
+                disabled={suspending}
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleSuspend}
+                className={`flex-1 px-4 py-2 text-sm font-medium text-white rounded-lg transition disabled:opacity-50 ${
+                  suspendModalUser.status === "suspended"
+                    ? "bg-green-600 hover:bg-green-700"
+                    : "bg-red-600 hover:bg-red-700"
+                }`}
+                disabled={suspending}
+              >
+                {suspending ? "Processing…" : (suspendModalUser.status === "suspended" ? "Activate" : "Suspend")}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Delete Confirmation Modal */}
+      {showDeleteModal && deleteModalUser && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
+          <div className="w-full max-w-lg bg-white rounded-xl shadow-xl p-6 space-y-4 max-h-[90vh] overflow-y-auto">
+            <div className="flex items-center justify-between">
+              <h2 className="text-lg font-semibold text-red-700">Delete User</h2>
+              <button
+                onClick={() => {
+                  setShowDeleteModal(false);
+                  setDeleteModalUser(null);
+                  setDeleteConfirmation(false);
+                  setDeleteResult(null);
+                }}
+                className="text-slate-400 hover:text-slate-600"
+              >
+                <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+
+            {/* Result state */}
+            {deleteResult ? (
+              <div className="space-y-3 text-sm">
+                <div className="p-3 bg-green-50 rounded-lg border border-green-200">
+                  <p className="font-medium text-green-800">User deleted successfully.</p>
+                </div>
+                <div className="space-y-1 text-slate-600">
+                  {deleteResult.borrowsEscalated > 0 && (
+                    <p>• {deleteResult.borrowsEscalated} borrow{deleteResult.borrowsEscalated !== 1 ? "s" : ""} escalated to pending return</p>
+                  )}
+                  {deleteResult.holdsReleased > 0 && (
+                    <p>• {deleteResult.holdsReleased} hold{deleteResult.holdsReleased !== 1 ? "s" : ""} released</p>
+                  )}
+                  {deleteResult.libraryArchived && (
+                    <p>• Library archived (user was library owner)</p>
+                  )}
+                </div>
+                <p className="text-xs text-slate-500">Returning to user list…</p>
+              </div>
+            ) : (
+              <>
+                <p className="text-sm text-slate-600">
+                  Delete user{" "}
+                  <span className="font-medium text-slate-900">{deleteModalUser.name || deleteModalUser.id}</span>?
+                </p>
+
+                <div className="p-3 bg-red-50 rounded-lg border border-red-200 space-y-1 text-sm text-red-800">
+                  <p className="font-medium">This action cannot be easily reversed:</p>
+                  <ul className="list-disc list-inside space-y-0.5 text-red-700">
+                    <li>Any unreturned borrows will be <strong>escalated</strong> as pending user deletion flags</li>
+                    <li>Active holds will be <strong>released</strong></li>
+                    {deleteModalUser.role === "library_owner" && (
+                      <li>Their library will be <strong>archived</strong></li>
+                    )}
+                  </ul>
+                </div>
+
+                <label className="flex items-start gap-2">
+                  <input
+                    type="checkbox"
+                    checked={deleteConfirmation}
+                    onChange={(e) => setDeleteConfirmation(e.target.checked)}
+                    className="mt-1 h-4 w-4 rounded border-red-300 text-red-600 focus:ring-red-500"
+                  />
+                  <span className="text-sm text-slate-700">
+                    I understand this cannot be easily reversed
+                  </span>
+                </label>
+
+                {error && (
+                  <div className="p-2 text-sm text-red-700 bg-red-50 rounded-lg">
+                    {error}
+                  </div>
+                )}
+
+                <div className="flex gap-3 pt-2">
+                  <button
+                    onClick={() => {
+                      setShowDeleteModal(false);
+                      setDeleteModalUser(null);
+                      setDeleteConfirmation(false);
+                    }}
+                    className="flex-1 px-4 py-2 text-sm font-medium text-slate-700 bg-white border border-slate-300 rounded-lg hover:bg-slate-50 transition"
+                    disabled={deleting}
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    onClick={handleDelete}
+                    className="flex-1 px-4 py-2 text-sm font-medium text-white bg-red-600 rounded-lg hover:bg-red-700 transition disabled:opacity-50"
+                    disabled={deleting || !deleteConfirmation}
+                  >
+                    {deleting ? "Deleting…" : "Delete User"}
+                  </button>
+                </div>
+              </>
+            )}
           </div>
         </div>
       )}
