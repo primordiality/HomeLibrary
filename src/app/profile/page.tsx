@@ -21,8 +21,10 @@ interface BookInfo {
 
 type TabType = 'current' | 'past';
 
+type ToastType = { id: number; message: string; type: 'success' | 'error' | 'info' };
+
 export default function ProfilePage() {
-  const { user, profile, loading: authLoading } = useAuth();
+  const { user, profile, loading: authLoading, updateProfile, updateEmail, changePassword } = useAuth();
   const [loading, setLoading] = useState(true);
   const [currentBorrows, setCurrentBorrows] = useState<BorrowRow[]>([]);
   const [pastBorrows, setPastBorrows] = useState<BorrowRow[]>([]);
@@ -33,6 +35,44 @@ export default function ProfilePage() {
   const [returnSuccess, setReturnSuccess] = useState<string | null>(null);
 
   const [activeTab, setActiveTab] = useState<TabType>('current');
+
+  // Toast management
+  const [toasts, setToasts] = useState<ToastType[]>([]);
+  const toastIdRef = useState(0)[1];
+
+  function toast(message: string, type: 'success' | 'error' | 'info') {
+    const id = Date.now() + Math.random();
+    setToasts((prev) => [...prev, { id, message, type }]);
+    setTimeout(() => {
+      setToasts((prev) => prev.filter((t) => t.id !== id));
+    }, 4000);
+  }
+
+  // Profile name editing
+  const [nameForm, setNameForm] = useState({
+    first_name: profile?.first_name || '',
+    last_name: profile?.last_name || '',
+    name: profile?.name || '',
+  });
+  const [nameSaving, setNameSaving] = useState(false);
+
+  // Email editing
+  const [newEmail, setNewEmail] = useState('');
+  const [emailSaving, setEmailSaving] = useState(false);
+
+  // Password editing
+  const [currentPw, setCurrentPw] = useState('');
+  const [newPw, setNewPw] = useState('');
+  const [confirmPw, setConfirmPw] = useState('');
+  const [pwSaving, setPwSaving] = useState(false);
+
+  useEffect(() => {
+    setNameForm({
+      first_name: profile?.first_name || '',
+      last_name: profile?.last_name || '',
+      name: profile?.name || '',
+    });
+  }, [profile]);
 
   useEffect(() => {
     if (!user || authLoading) return;
@@ -180,6 +220,82 @@ export default function ProfilePage() {
     ? [profile?.first_name, profile?.last_name].filter(Boolean).join(' ')
     : profile?.email || 'User';
 
+  // Name update handler
+  async function handleNameUpdate(e: React.FormEvent) {
+    e.preventDefault();
+    if (!nameForm.first_name.trim() && !nameForm.last_name.trim()) {
+      toast('Please enter a name.', 'error');
+      return;
+    }
+    setNameSaving(true);
+    try {
+      const result = await updateProfile({
+        name: nameForm.name || [nameForm.first_name, nameForm.last_name].filter(Boolean).join(' '),
+        first_name: nameForm.first_name || undefined,
+        last_name: nameForm.last_name || undefined,
+      });
+      if (result.error) {
+        toast(result.error, 'error');
+      } else {
+        toast('Name updated successfully!', 'success');
+      }
+    } finally {
+      setNameSaving(false);
+    }
+  }
+
+  // Email update handler
+  async function handleEmailUpdate(e: React.FormEvent) {
+    e.preventDefault();
+    if (!newEmail.trim() || !newEmail.includes('@')) {
+      toast('Please enter a valid email address.', 'error');
+      return;
+    }
+    setEmailSaving(true);
+    try {
+      const result = await updateEmail(newEmail.trim());
+      if (result.error) {
+        toast(result.error, 'error');
+      } else {
+        toast('Confirmation email sent. Check your inbox to complete the change.', 'info');
+        setNewEmail('');
+      }
+    } finally {
+      setEmailSaving(false);
+    }
+  }
+
+  // Password update handler
+  async function handlePasswordChange(e: React.FormEvent) {
+    e.preventDefault();
+    if (!currentPw) {
+      toast('Please enter your current password.', 'error');
+      return;
+    }
+    if (newPw.length < 6) {
+      toast('New password must be at least 6 characters.', 'error');
+      return;
+    }
+    if (newPw !== confirmPw) {
+      toast('New passwords do not match.', 'error');
+      return;
+    }
+    setPwSaving(true);
+    try {
+      const result = await changePassword(currentPw, newPw);
+      if (result.error) {
+        toast(result.error, 'error');
+      } else {
+        toast('Password changed. You will be signed out on other devices.', 'success');
+        setCurrentPw('');
+        setNewPw('');
+        setConfirmPw('');
+      }
+    } finally {
+      setPwSaving(false);
+    }
+  }
+
   if (loading || authLoading) return <p className="text-sm text-slate-500">Loading...</p>;
   if (!user) {
     return (
@@ -197,6 +313,24 @@ export default function ProfilePage() {
 
   return (
     <div className="max-w-2xl mx-auto space-y-8">
+      {/* Toast notifications */}
+      <div className="fixed top-4 right-4 z-50 space-y-2 max-w-sm w-full pointer-events-none">
+        {toasts.map((t) => (
+          <div
+            key={t.id}
+            className={`pointer-events-auto rounded-lg px-4 py-3 shadow-lg text-sm font-medium transition ${
+              t.type === 'success'
+                ? 'bg-green-600 text-white'
+                : t.type === 'error'
+                ? 'bg-red-600 text-white'
+                : 'bg-blue-600 text-white'
+            }`}
+          >
+            {t.message}
+          </div>
+        ))}
+      </div>
+
       {/* Profile Info */}
       <section className="rounded-xl border bg-white p-6 shadow-sm">
         <h2 className="text-lg font-semibold text-slate-900 mb-4">Profile</h2>
@@ -214,6 +348,150 @@ export default function ProfilePage() {
             <dd className="text-slate-900 font-medium capitalize">{profile?.role || '—'}</dd>
           </div>
         </div>
+      </section>
+
+      {/* Edit Name */}
+      <section className="rounded-xl border bg-white p-6 shadow-sm">
+        <h2 className="text-lg font-semibold text-slate-900 mb-4">Edit Name</h2>
+        <form onSubmit={handleNameUpdate} className="space-y-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div>
+              <label htmlFor="first_name" className="block text-sm font-medium text-slate-700 mb-1">
+                First Name
+              </label>
+              <input
+                id="first_name"
+                type="text"
+                value={nameForm.first_name}
+                onChange={(e) => setNameForm((f) => ({ ...f, first_name: e.target.value, name: [e.target.value, f.last_name].filter(Boolean).join(' ') }))}
+                className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 outline-none"
+              />
+            </div>
+            <div>
+              <label htmlFor="last_name" className="block text-sm font-medium text-slate-700 mb-1">
+                Last Name
+              </label>
+              <input
+                id="last_name"
+                type="text"
+                value={nameForm.last_name}
+                onChange={(e) => setNameForm((f) => ({ ...f, last_name: e.target.value, name: [f.first_name, e.target.value].filter(Boolean).join(' ') }))}
+                className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 outline-none"
+              />
+            </div>
+          </div>
+          <div>
+            <label htmlFor="full_name" className="block text-sm font-medium text-slate-700 mb-1">
+              Full Name
+            </label>
+            <input
+              id="full_name"
+              type="text"
+              value={nameForm.name}
+              onChange={(e) => setNameForm((f) => ({ ...f, name: e.target.value }))}
+              className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 outline-none"
+            />
+            <p className="mt-1 text-xs text-slate-500">Auto-filled from first & last name, or enter manually.</p>
+          </div>
+          <button
+            type="submit"
+            disabled={nameSaving}
+            className="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700 transition-colors disabled:opacity-50"
+          >
+            {nameSaving ? 'Saving...' : 'Update'}
+          </button>
+        </form>
+      </section>
+
+      {/* Change Email */}
+      <section className="rounded-xl border bg-white p-6 shadow-sm">
+        <h2 className="text-lg font-semibold text-slate-900 mb-4">Change Email</h2>
+        <form onSubmit={handleEmailUpdate} className="space-y-4">
+          <div>
+            <p className="text-sm text-slate-700 mb-1">
+              Current email: <span className="font-medium">{user.email}</span>
+            </p>
+          </div>
+          <div>
+            <label htmlFor="new_email" className="block text-sm font-medium text-slate-700 mb-1">
+              New Email
+            </label>
+            <input
+              id="new_email"
+              type="email"
+              value={newEmail}
+              onChange={(e) => setNewEmail(e.target.value)}
+              placeholder="new.email@example.com"
+              className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 outline-none"
+            />
+            <p className="mt-1 text-xs text-blue-700 bg-blue-50 rounded px-3 py-1.5">
+              A confirmation email will be sent to the new address. Click the link in the email to complete the change.
+            </p>
+          </div>
+          <button
+            type="submit"
+            disabled={emailSaving}
+            className="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700 transition-colors disabled:opacity-50"
+          >
+            {emailSaving ? 'Updating...' : 'Update Email'}
+          </button>
+        </form>
+      </section>
+
+      {/* Change Password */}
+      <section className="rounded-xl border bg-white p-6 shadow-sm">
+        <h2 className="text-lg font-semibold text-slate-900 mb-4">Change Password</h2>
+        <form onSubmit={handlePasswordChange} className="space-y-4">
+          <div className="space-y-3">
+            <div>
+              <label htmlFor="current_pw" className="block text-sm font-medium text-slate-700 mb-1">
+                Current Password
+              </label>
+              <input
+                id="current_pw"
+                type="password"
+                value={currentPw}
+                onChange={(e) => setCurrentPw(e.target.value)}
+                className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 outline-none"
+              />
+            </div>
+            <div>
+              <label htmlFor="new_pw" className="block text-sm font-medium text-slate-700 mb-1">
+                New Password
+              </label>
+              <input
+                id="new_pw"
+                type="password"
+                value={newPw}
+                onChange={(e) => setNewPw(e.target.value)}
+                className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 outline-none"
+              />
+              <p className="mt-1 text-xs text-slate-500">Must be at least 6 characters.</p>
+            </div>
+            <div>
+              <label htmlFor="confirm_pw" className="block text-sm font-medium text-slate-700 mb-1">
+                Confirm New Password
+              </label>
+              <input
+                id="confirm_pw"
+                type="password"
+                value={confirmPw}
+                onChange={(e) => setConfirmPw(e.target.value)}
+                className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 outline-none"
+              />
+            </div>
+          </div>
+          <p className="text-xs text-amber-700 bg-amber-50 rounded px-3 py-1.5">
+            This will sign you out on all other devices.
+          </p>
+          <button
+            type="submit"
+            disabled={pwSaving}
+            className="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700 transition-colors disabled:opacity-50"
+          >
+            {pwSaving ? 'Changing...' : 'Change Password'}
+          </button>
+        </form>
       </section>
 
       {/* Borrowing History */}
