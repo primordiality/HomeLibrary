@@ -12,7 +12,7 @@ const CONDITION_COLORS: Record<string, string> = {
   new: 'bg-emerald-100 text-emerald-800',
   good: 'bg-blue-100 text-blue-800',
   fair: 'bg-amber-100 text-amber-800',
-  poor: 'bg-orange-100 text-orange-800',
+  poor: 'bg-orange-100 text-orange-700',
   damaged: 'bg-red-100 text-red-800',
 };
 
@@ -40,11 +40,6 @@ export default function BookDetailPage({ params }: { params: { bookId: string } 
   const [placeHoldError, setPlaceHoldError] = useState<string | null>(null);
   const [placeHoldSuccess, setPlaceHoldSuccess] = useState<string | null>(null);
   const [holdPosition, setHoldPosition] = useState<number | null>(null);
-
-  // Borrow state
-  const [borrowLoading, setBorrowLoading] = useState(false);
-  const [borrowSuccess, setBorrowSuccess] = useState<string | null>(null);
-  const [borrowError, setBorrowError] = useState<string | null>(null);
 
   // Book settings
   const [bookSettings, setBookSettings] = useState<BookSettings | null>(null);
@@ -224,58 +219,6 @@ export default function BookDetailPage({ params }: { params: { bookId: string } 
     }
   }
 
-  // Borrow book flow
-  async function handleBorrow(copyId: string): Promise<void> {
-    if (!user) return;
-    setBorrowLoading(true);
-    setBorrowError(null);
-    setBorrowSuccess(null);
-    try {
-      const today = new Date();
-      const checkoutDate = today.toISOString().split('T')[0];
-      const dueDate = new Date(today);
-      dueDate.setDate(dueDate.getDate() + 14);
-      const dueDateStr = dueDate.toISOString().split('T')[0];
-
-      const { error } = await supabase.from('borrows').insert({
-        patron_user_id: user.id,
-        copy_id: copyId,
-        checkout_date: checkoutDate,
-        due_date: dueDateStr,
-      });
-
-      if (error) {
-        setBorrowError(error.message);
-      } else {
-        // Optimistic update: remove the copy from available, add to borrows
-        const dueDateDisplay = new Date(dueDateStr).toLocaleDateString(undefined, {
-          year: 'numeric',
-          month: 'long',
-          day: 'numeric',
-        });
-        setBorrowSuccess(`Book borrowed successfully. Due ${dueDateDisplay}.`);
-        // Remove the borrowed copy from copies list
-        setCopies((prev) => prev.filter((c) => c.id !== copyId));
-        // Add to borrows list
-        setBorrows((prev) => [...prev, {
-          patron_user_id: user.id,
-          copy_id: copyId,
-          checkout_date: checkoutDate,
-          due_date: dueDateStr,
-          return_date: null,
-        }]);
-        // Hide success message after 3 seconds
-        setTimeout(() => setBorrowSuccess(null), 3000);
-        // Refresh the page to sync state
-        router.refresh();
-      }
-    } catch (err) {
-      setBorrowError('Failed to borrow book. Please try again.');
-    } finally {
-      setBorrowLoading(false);
-    }
-  }
-
   // Build copies with status
   const copiesWithStatus: CopyDetail[] = copies.map((copy) => {
     const borrow = borrows.find((b: any) => b.copy_id === copy.id && !b.return_date);
@@ -304,18 +247,10 @@ export default function BookDetailPage({ params }: { params: { bookId: string } 
   const availableCopies = copiesWithStatus.filter(c => c.status === 'available').length;
   const allCheckedOut = availableCopies === 0 && totalCopies > 0;
 
-  // Check if user already has this book checked out
-  const userHasBook = user && borrows.some(
-    (b: any) => b.patron_user_id === user.id && !b.return_date
-  );
-
   // Check if user already has an active hold for this book
   const userHasHold = user && holds.some(
     (h: any) => h.patron_user_id === user.id && (h.status === 'waiting' || h.status === 'accepted')
   );
-
-  // Get an available copy for the borrow button
-  const availableCopy = copiesWithStatus.find((c) => c.status === 'available');
 
   const userIsAuthenticated = !!user;
   const isStaff = profile?.role && ['system_admin', 'library_owner', 'librarian'].includes(profile.role);
@@ -364,55 +299,15 @@ export default function BookDetailPage({ params }: { params: { bookId: string } 
         </div>
       )}
 
-      {/* Patron Borrow Section */}
-      {userIsAuthenticated && user && bookSettings?.checkouts_enabled !== false && !allCheckedOut && !userHasBook && availableCopy && (
-        <div className="rounded-xl border border-indigo-200 bg-indigo-50 p-4">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-sm font-medium text-indigo-900">Available to borrow</p>
-              <p className="text-xs text-indigo-600 mt-0.5">Due in 14 days</p>
-            </div>
-            <button
-              onClick={() => handleBorrow(availableCopy.id)}
-              disabled={borrowLoading}
-              className="rounded-lg bg-indigo-600 px-5 py-2.5 text-sm font-medium text-white shadow-sm hover:bg-indigo-700 transition disabled:opacity-50 disabled:cursor-not-allowed"
-            >
-              {borrowLoading ? 'Borrowing...' : 'Borrow This Book'}
-            </button>
-          </div>
-          {borrowSuccess && (
-            <p className="mt-2 text-sm text-green-700 font-medium">{borrowSuccess}</p>
-          )}
-          {borrowError && (
-            <p className="mt-2 text-sm text-red-600">{borrowError}</p>
-          )}
-        </div>
-      )}
-
       {/* Checkouts not available */}
-      {userIsAuthenticated && user && bookSettings?.checkouts_enabled === false && !userHasBook && (
+      {userIsAuthenticated && user && bookSettings?.checkouts_enabled === false && (
         <div className="rounded-xl border border-amber-200 bg-amber-50 p-4">
           <p className="text-sm text-amber-800">This book is not available for checkouts.</p>
         </div>
       )}
 
-      {/* Already have this book */}
-      {userIsAuthenticated && user && userHasBook && (
-        <div className="rounded-xl border border-amber-200 bg-amber-50 p-4">
-          <p className="text-sm font-medium text-amber-800">
-            You already have this book checked out.
-          </p>
-          <Link
-            href="/patrons/dashboard"
-            className="mt-2 inline-block text-sm text-indigo-600 hover:text-indigo-800 font-medium"
-          >
-            View your dashboard →
-          </Link>
-        </div>
-      )}
-
       {/* Already have a hold */}
-      {userIsAuthenticated && user && userHasHold && !userHasBook && (
+      {userIsAuthenticated && user && userHasHold && (
         <div className="rounded-xl border border-amber-200 bg-amber-50 p-4">
           <p className="text-sm font-medium text-amber-800">
             You already have a hold on this book.
