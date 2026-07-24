@@ -267,6 +267,22 @@ export default function AdminUsers() {
       setNewRole("patron");
       setSelectedLibraryId(null);
       setLibrarySearch("");
+      // Invalidate old sessions so the role change takes effect immediately
+      try {
+        await fetch(
+          `${process.env.NEXT_PUBLIC_SUPABASE_URL!}/functions/v1/invalidate-sessions`,
+          {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!}`,
+            },
+            body: JSON.stringify({ userId: roleModalUser.id }),
+          }
+        );
+      } catch {
+        // Non-critical: user may see old permissions until next login
+      }
       await loadUsers();
     } catch (e) {
       setError("Failed to update role. Check your connection.");
@@ -402,6 +418,22 @@ export default function AdminUsers() {
       showToast(`${suspendModalUser.name || "User"} marked as ${newStatus}.`);
       setShowSuspendModal(false);
       setSuspendModalUser(null);
+      // Invalidate old sessions so the status change takes effect immediately
+      try {
+        await fetch(
+          `${process.env.NEXT_PUBLIC_SUPABASE_URL!}/functions/v1/invalidate-sessions`,
+          {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!}`,
+            },
+            body: JSON.stringify({ userId: suspendModalUser.id }),
+          }
+        );
+      } catch {
+        // Non-critical: user may see old permissions until next login
+      }
       await loadUsers();
     } catch (e) {
       setError("Failed to update status. Check your connection.");
@@ -431,6 +463,22 @@ export default function AdminUsers() {
       showToast(`${approveModalUser.name || "User"} approved successfully.`);
       setShowApproveModal(false);
       setApproveModalUser(null);
+      // Invalidate old sessions so the status change takes effect immediately
+      try {
+        await fetch(
+          `${process.env.NEXT_PUBLIC_SUPABASE_URL!}/functions/v1/invalidate-sessions`,
+          {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!}`,
+            },
+            body: JSON.stringify({ userId: approveModalUser.id }),
+          }
+        );
+      } catch {
+        // Non-critical: user may see old permissions until next login
+      }
       await loadUsers();
     } catch (e) {
       setError("Failed to approve user. Check your connection.");
